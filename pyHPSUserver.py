@@ -153,7 +153,7 @@ def main(argv):
     while True:
         (clientsocket, address) = net_socket.accept() 
         print("Got connection from %s port %s " % (address[0],address[1]) ) 
-        start_new_thread(clientthread, (clientsocket,driver,logger,port,cmd,lg_code,verbose,output_type))
+        start_new_thread(clientthread, (clientsocket,address,driver,logger,port,cmd,lg_code,verbose,output_type))
         #print(address[0])
         #start_new_thread(testthread, (clientsocket,))
         
@@ -164,22 +164,23 @@ def main(argv):
 
 
 
-def clientthread(connection,driver,logger,port,cmd,lg_code,verbose,output_type):
+def clientthread(clientsocket,address,driver,logger,port,cmd,lg_code,verbose,output_type):
     cmd=[]
     global n_hpsu
     while True:
         try:
-            read_command=connection.recv(1024).decode()
+            read_command=clientsocket.recv(1024).decode()
             if "quit" in read_command:
-                connection.shutdown(socket.SHUT_RDWR)
-                connection.close()
-                False
+                clientsocket.shutdown(socket.SHUT_RDWR)
+                clientsocket.close()
+                print("Connection from " + address[0] + " closed")
+                return False
             else:
                 cmd=read_command.split()
                 n_hpsu = HPSU(driver=driver, logger=logger, port=port, cmd=cmd, lg_code=lg_code)
                 return_command=read_can(driver, logger, port, cmd, lg_code,verbose,output_type)
                 for item in return_command:
-                    connection.sendall((str(item) + "\n").encode("utf-8")) 
+                    clientsocket.sendall((str(item) + "\n").encode("utf-8")) 
 
         except UnicodeDecodeError:
             pass
