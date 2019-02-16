@@ -7,7 +7,9 @@ import sys
 import socket
 from HPSU.HPSU import HPSU
 import time
-from _thread import * 
+import _thread 
+import logging
+import locale 
 
 
 def main(argv):
@@ -15,7 +17,6 @@ def main(argv):
     port = None
     driver = "PYCAN"
     verbose = "1"
-    show_help = False
     output_type = "JSON"
     global default_conf_file
     default_conf_file = "/etc/pyHPSU/pyhpsu.conf"
@@ -153,12 +154,7 @@ def main(argv):
     while True:
         (clientsocket, address) = net_socket.accept() 
         print("Got connection from %s port %s " % (address[0],address[1]) ) 
-        start_new_thread(clientthread, (clientsocket,address,driver,logger,port,cmd,lg_code,verbose,output_type))
-        #print(address[0])
-        #start_new_thread(testthread, (clientsocket,))
-        
-
-        
+        _thread.start_new_thread(clientthread, (clientsocket,address,driver,logger,port,cmd,lg_code,verbose,output_type))
     clientsocket.close()
 
 
@@ -179,8 +175,11 @@ def clientthread(clientsocket,address,driver,logger,port,cmd,lg_code,verbose,out
                 cmd=read_command.split()
                 n_hpsu = HPSU(driver=driver, logger=logger, port=port, cmd=cmd, lg_code=lg_code)
                 return_command=read_can(driver, logger, port, cmd, lg_code,verbose,output_type)
-                for item in return_command:
-                    clientsocket.sendall((str(item) + "\n").encode("utf-8")) 
+                if len(return_command) != 0:
+                    clientsocket.sendall((str(return_command) + "\nOK\n").encode("utf-8")) 
+                else:
+                    clientsocket.sendall(("OK\n").encode("utf-8"))
+                    
 
         except UnicodeDecodeError:
             pass
@@ -213,6 +212,7 @@ def read_can(driver,logger,port,cmd,lg_code,verbose,output_type):
                 n_hpsu.printd('warning', 'retry %s command %s' % (i, c["name"]))
                 if i == 4:
                     n_hpsu.printd('error', 'command %s failed' % (c["name"]))
+                    
     return arrResponse
 
 
