@@ -43,6 +43,13 @@ def main(argv):
     ticker=0
     loop=True
     auto=False
+    LOG_LEVEL_STRING = 'DEBUG, INFO, WARNING, ERROR, CRITICAL'
+    # default to loggin.error if --log_level option not present
+    desired_log_level = logging.ERROR
+    # default log to stdout if no file specified
+    log_handler = logging.StreamHandler()
+    # default log formatter
+    log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
     #commands = []
     #listCommands = []
     global config
@@ -68,11 +75,11 @@ def main(argv):
             PLUGIN_LIST.append(PLUGIN)
 
     try:
-        opts, args = getopt.getopt(argv,"ahc:p:d:v:o:l:g:f:b:r:", ["help", "cmd=", "port=", "driver=", "verbose=", "output_type=", "upload=", "language=", "log=", "config_file="])
+        opts, args = getopt.getopt(argv,"ahc:p:d:v:o:l:g:f:b:r:", ["help", "cmd=", "port=", "driver=", "verbose=", "output_type=", "upload=", "language=", "log=", "log_level=", "config_file="])
     except getopt.GetoptError:
         print('pyHPSU.py -d DRIVER -c COMMAND')
         print(' ')
-        print('           -a  --auto            do atomatic queries')
+        print('           -a  --auto            do automatic queries')
         print('           -f  --config          Configfile, overrides given commandline arguments')
         print('           -d  --driver          driver name: [ELM327, PYCAN, EMU, HPSUD], Default: PYCAN')
         print('           -p  --port            port (eg COM or /dev/tty*, only for ELM327 driver)')
@@ -82,7 +89,8 @@ def main(argv):
         print('           -l  --language        set the language to use [%s], default is \"EN\" ' % " ".join(languages))
         print('           -b  --backup          backup configurable settings to file [filename]')
         print('           -r  --restore         restore HPSU settings from file [filename]')
-        print('           -g  --log             set the log to file [_filename]')
+        print('           -g  --log             set the log to file [filename]')
+        print('           --log_level           set the log level to [' + LOG_LEVEL_STRING + ']')
         print('           -h  --help            show help')
         sys.exit(2)
 
@@ -135,13 +143,34 @@ def main(argv):
             options_list["language"]=arg.upper()
 
         elif opt in ("-g", "--log"):
-            logger = logging.getLogger('pyhpsu')
-            hdlr = logging.FileHandler(arg)
-            formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
-            hdlr.setFormatter(formatter)
-            logger.addHandler(hdlr)
-            logger.setLevel(logging.ERROR)
+            log_handler = logging.FileHandler(arg)
+            options_list["log_file"]=arg
+
+        elif opt in ("--log_level"):
+            if arg == 'DEBUG':
+                desired_log_level = logging.DEBUG
+            elif arg == 'INFO':
+                desired_log_level = logging.INFO
+            elif arg == 'WARNING':
+                desired_log_level = logging.WARNING
+            elif arg == 'ERROR':
+                desired_log_level = logging.ERROR
+            elif arg == 'CRITICAL':
+                desired_log_level = logging.CRITICAL
+            else:
+                print("Error, " + arg + " is not a valid value for log_level option, use [" + LOG_LEVEL_STRING + "]")
+                sys.exit(2)
         options_list["cmd"]=cmd
+        
+    # if no log file has been specified and driver is HPSUD then log nothing
+    if options_list.get("log_file") is None and driver == "HPSUD":
+        log_handler = logging.NullHandler
+
+    logger = logging.getLogger('pyhpsu')
+    log_handler.setFormatter(log_formatter)
+    logger.addHandler(log_handler)
+    logger.setLevel(desired_log_level)
+
     if verbose == "2":
         locale.setlocale(locale.LC_ALL, '')
 
@@ -153,14 +182,14 @@ def main(argv):
     # get config from file if given....
     if read_from_conf_file:
         if conf_file==None:
-            print("Error, please provide a config file")
+            logger.error("please provide a config file")
             sys.exit(9)
         else:
             try:
                 with open(conf_file) as f:
                     config.read_file(f)
             except IOError:
-                print("Error: config file not found")
+                logger.error("config file not found")
                 sys.exit(9)
         config.read(conf_file)
         if driver=="" and config.has_option('PYHPSU','PYHPSU_DEVICE'):
@@ -180,21 +209,21 @@ def main(argv):
     #
     # Check driver
     if driver not in ["ELM327", "PYCAN", "EMU", "HPSUD"]:
-        print("Error, please specify a correct driver [ELM327, PYCAN, EMU, HPSUD] ")
+        logger.error("please specify a correct driver [ELM327, PYCAN, EMU, HPSUD] ")
         sys.exit(9)
 
     if driver == "ELM327" and port == "":
-        print("Error, please specify a correct port for the ELM327 device ")
+        logger.error("please specify a correct port for the ELM327 device ")
         sys.exit(9)
 
     # Check output type
     if output_type not in PLUGIN_LIST:
-        print("Error, please specify a correct output_type [" + PLUGIN_STRING + "]")
+        logger.error("please specify a correct output_type [" + PLUGIN_STRING + "]")
         sys.exit(9)
 
     # Check Language
     if lg_code not in languages:
-        print("Error, please specify a correct language [%s]" % " ".join(languages))
+        logger.error("please specify a correct language [%s]" % " ".join(languages))
         sys.exit(9)
     # ------------------------------------
     # try to query different commands in different periods
@@ -212,7 +241,7 @@ def main(argv):
                     timed_jobs["timer_" + job_period].append(each_key)  # and add the value to this period
                 wanted_periods=list(timed_jobs.keys())
             else:
-                print("Error, please specify a value to query in config file ")
+                logger.error("please specify a value to query in config file ")
                 sys.exit(9)
 
     #
@@ -226,14 +255,16 @@ def main(argv):
             print("%20s---%-10s" % ('------------', '----------'))
             for cmd in sorted(n_hpsu.command_dict) :
                 try:
-                    print("%20s - %-10s" % (n_hpsu.command_dict[cmd]['name'], n_hpsu.command_dict[cmd]['label']))
+                    print("%20s - %-10s" % (n_hpsu.command_dict[cmd]['name'], (n_hpsu.command_dict[cmd]['label']) + ('' if n_hpsu.command_dict[cmd]['writable']=='true' else ' (readonly)')))
                 except KeyError:
-                    print("""!!!!!! No translation for "%12s" !!!!!!!""" % (n_hpsu.command_dict[cmd]['name']))
+                    error_message = """!!!!!! No translation for "%12s" !!!!!!!""" % (n_hpsu.command_dict[cmd]['name'])
+                    print(error_message)
+                    logger.error(error_message)
         else:
             print("%12s - %-10s - %s" % ('COMMAND', 'LABEL', 'DESCRIPTION'))
             print("%12s---%-10s---%s" % ('------------', '----------', '---------------------------------------------------'))
             for c in n_hpsu.commands:
-                print("%12s - %-10s - %s" % (c['name'], c['label'], c['desc']))
+                print("%12s - %-10s - %s" % (c['name'], c['label'] + ('' if c['writable']=='true' else ' (readonly)'), c['desc']))
         sys.exit(0)
 
         #
@@ -267,7 +298,7 @@ def main(argv):
                 n_hpsu = HPSU(driver=driver, logger=logger, port=port, cmd=restore_commands, lg_code=lg_code)
                 read_can(driver, logger, port, restore_commands, lg_code,verbose,output_type)
         except FileNotFoundError:
-            print("No such file or directory!!!")
+            logger.error("No such file or directory!!!")
             sys.exit(1)
 
     else:
@@ -291,7 +322,7 @@ def read_can(driver,logger,port,cmd,lg_code,verbose,output_type):
                     if not c["type"] == "value":
                         setValue = float(setValue)*float(c["divisor"])
                     else:
-                        n_hpsu.printd('error', 'type "value" not implemented since yet')
+                        logger.error('type "value" not implemented since yet')
                         return
 
             i = 0
@@ -307,9 +338,9 @@ def read_can(driver,logger,port,cmd,lg_code,verbose,output_type):
                 else:
                     i += 1
                     time.sleep(2.0)
-                    n_hpsu.printd('warning', 'retry %s command %s' % (i, c["name"]))
+                    logger.warning('retry %s command %s' % (i, c["name"]))
                     if i == 4:
-                        n_hpsu.printd('error', 'command %s failed' % (c["name"]))
+                        logger.error('command %s failed' % (c["name"]))
 
     if output_type == "JSON":
         if len(arrResponse)!=0:
@@ -318,12 +349,17 @@ def read_can(driver,logger,port,cmd,lg_code,verbose,output_type):
         for r in arrResponse:
             print("%s,%s,%s" % (r["timestamp"], r["name"], r["resp"]))
     elif output_type == "BACKUP":
-        print("Writing Backup to " + str(backup_file))
+        error_message = "Writing Backup to " + str(backup_file)
+        print(error_message)
+        logger.info(error_message)
+        
         try:
             with open(backup_file, 'w') as outfile:
                 json.dump(arrResponse, outfile, sort_keys = True, indent = 4, ensure_ascii = False)
         except FileNotFoundError:
-            print("No such file or directory!!!")
+            error_message = "No such file or directory!!!"
+            print(error_message)
+            logger.error(error_message)
             sys.exit(1)
     else:
         module_name=output_type.lower()
