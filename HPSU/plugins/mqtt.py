@@ -31,7 +31,7 @@ class export():
         if os.path.isfile(self.config_file):
             self.config.read(self.config_file)
         else:
-            sys.exit(9)
+            sys.exit(os.EX_CONFIG)
 
         # object to store entire MQTT config section
         self.mqtt_config = self.config['MQTT']
@@ -52,6 +52,10 @@ class export():
         self.logger.info("configuration parsing complete")   
 
         # no need to create a different client name every time, because it only publish
+        # so adding the PID at the end of the client name ensures every process have a
+        # different client name only for readability on broker and troubleshooting
+        self.clientname += "-" + str(os.getpid())
+
         self.logger.info("creating new mqtt client instance: " + self.clientname)
         self.client=mqtt.Client(self.clientname)
         self.client.on_publish = self.on_publish
@@ -65,10 +69,11 @@ class export():
 
     def pushValues(self, vars=None):
 
+        self.logger.info("connecting to broker: " + self.brokerhost + ", port: " + str(self.brokerport))
+        self.client.connect(self.brokerhost, port=self.brokerport)
+
         #self.msgs=[]
         for r in vars:
-            self.logger.info("connecting to broker: " + self.brokerhost + ", port: " + str(self.brokerport))
-            self.client.connect(self.brokerhost, port=self.brokerport)
             msgs=[]
             if self.prefix:
                 ret=self.client.publish(self.prefix + "/" + r['name'],payload=r['resp'], qos=int(self.qos))
@@ -77,4 +82,5 @@ class export():
                 ret=self.client.publish(r['name'],payload=r['resp'], qos=int(self.qos))
                 topic=r['name']
             msg={'topic':topic,'payload':r['resp'], 'qos':self.qos, 'retain':False}
-            self.client.disconnect()
+
+        self.client.disconnect()
