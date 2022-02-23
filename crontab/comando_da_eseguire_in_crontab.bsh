@@ -1,0 +1,11 @@
+#!/bin/bash
+cd
+source .profile
+date
+pyHPSU.py -c flow_rate -c posmix -c bpv -c t_v1 -c t_dhw1 -c t_r1 -c pump -c ehs -c mode -c t_hc_set -c t_dhw_set -c t_vbh -c t_ext -o mqtt	
+
+
+
+## in crontab è necessario utilizzare la redirezione dell'output su dev/null ovvero
+#    comando.sh  >/dev/null 2>&1
+
