@@ -280,6 +280,8 @@ def read_can(driver,logger,port,cmd,lg_code,verbose,output_type):
     #if not driver:
     #    print("Error, please specify driver [ELM327 or PYCAN, EMU, HPSUD]")
     #    sys.exit(9)
+    
+    print("chiamo read_can "+output_type)
 
     arrResponse = []
 
@@ -327,10 +329,17 @@ def read_can(driver,logger,port,cmd,lg_code,verbose,output_type):
             print("No such file or directory!!!")
             sys.exit(1)
     else:
+	###MODIFICA ###
+        print(" --------------------")
+       
         module_name=output_type.lower()
         module = importlib.import_module("HPSU.plugins." + module_name)
         hpsu_plugin = module.export(hpsu=n_hpsu, logger=logger, config_file=conf_file)
+ 
         hpsu_plugin.pushValues(vars=arrResponse)
+        print("pushValues chiamato")
+        print(" --------------------")
+
 
 if __name__ == "__main__":
     main(sys.argv[1:])
