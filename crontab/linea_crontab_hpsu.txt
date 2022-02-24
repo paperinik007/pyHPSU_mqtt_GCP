@@ -1,5 +1,5 @@
 inserire con crontab -e e visualizzare con crontab -l
 
 
-0,5,10,15,20.25.30.35.40,45,50,55 * * * * /home/pi/comando_da_eseguire_in_crontab.bsh  >/dev/null 2>&1
+0,5,10,15,20,25,30,35,40,45,50,55 * * * * /home/pi/comando_da_eseguire_in_crontab.bsh  >/dev/null 2>&1
 #* * * * * /home/pi/comando_da_eseguire_in_crontab.bsh  >/home/pi/trace_comando.log 2>&1
