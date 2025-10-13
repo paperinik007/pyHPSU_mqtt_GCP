@@ -34,6 +34,12 @@ import os
 import paho.mqtt.publish as publish
 import paho.mqtt.client as mqtt
 
+# Optional Google Cloud Pub/Sub publisher (used if configured)
+try:
+    from google.cloud import pubsub_v1  # type: ignore
+except Exception:
+    pubsub_v1 = None
+
 algorithm='ES256' 
 #ca_certs='/home/pi/python-docs-samples/iot/api-client/mqtt_example/keys/roots.pem' 
 ca_certs='/usr/lib/python3/dist-packages/HPSU/plugins/keys/roots.pem' 
@@ -138,6 +144,45 @@ class export():
         stringa = stringa + fine 
         print(stringa)
 
+        # Prefer Pub/Sub if configured via [PUBSUB] or environment variables
+        # Env vars: PUBSUB_PROJECT_ID, PUBSUB_TOPIC_ID, GOOGLE_APPLICATION_CREDENTIALS
+        pubsub_project_id = None
+        pubsub_topic_id = None
+        publisher_client = None
+        topic_path = None
+
+        try:
+            # Read from config section if present
+            if self.config.has_section('PUBSUB'):
+                pubsub_project_id = self.config.get('PUBSUB', 'PROJECT_ID', fallback=os.environ.get('PUBSUB_PROJECT_ID'))
+                pubsub_topic_id = self.config.get('PUBSUB', 'TOPIC_ID', fallback=os.environ.get('PUBSUB_TOPIC_ID'))
+            else:
+                pubsub_project_id = os.environ.get('PUBSUB_PROJECT_ID')
+                pubsub_topic_id = os.environ.get('PUBSUB_TOPIC_ID')
+
+            if pubsub_v1 is not None and pubsub_project_id and pubsub_topic_id:
+                publisher_client = pubsub_v1.PublisherClient()
+                topic_path = publisher_client.topic_path(pubsub_project_id, pubsub_topic_id)
+        except Exception as e:
+            print("Pub/Sub init failed: {}".format(str(e)))
+            publisher_client = None
+            topic_path = None
+
+        if publisher_client and topic_path:
+            try:
+                future = publisher_client.publish(
+                    topic_path,
+                    stringa.encode('utf-8'),
+                    content_type='application/json'
+                )
+                # Wait briefly for publish confirmation
+                future.result(timeout=10)
+                print("Published to Pub/Sub topic {}".format(topic_path))
+                return
+            except Exception as e:
+                print("Publish to Pub/Sub failed: {}. Falling back to MQTT.".format(str(e)))
+
+        # Fallback to legacy MQTT path (Google IoT Core) if Pub/Sub not configured
         mqtt_device_demo(stringa)
 
 

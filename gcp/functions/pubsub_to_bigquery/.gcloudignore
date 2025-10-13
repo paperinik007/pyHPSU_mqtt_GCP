@@ -1,0 +1,5 @@
+# Exclude local files from function source upload
+__pycache__/
+venv/
+.env
+*.pyc

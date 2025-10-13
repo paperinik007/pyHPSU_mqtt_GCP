@@ -50,6 +50,7 @@ pyHPSU only runs on unix/linux based systems.
 - python3-urllib3 (used by the homematic plugin)
 - python3-paho-mqtt (used by the mqtt plugin)
 - python3-influxdb (used by the influxdb plugn)
+ - google-cloud-pubsub (if si usa Pub/Sub)
 
 2. git clone https://github.com/Spanni26/pyHPSU
 3. cd pyHPSU
@@ -99,11 +100,48 @@ Send the data to homematic. Therefore the xmlapi has to be installed on the ccu,
 Send the data to the InfluxDB Time Series database.
 Configure it in /etc/pyHPSU/pyhpsu.conf (look at the code of /usr/lib/python3/dist-packages/HPSU/plugins/influxdb.py to find a template).
 
-### MQTT
-Send the data to an MQTT broker.
-Configure it in /etc/pyHPSU/pyhpsu.conf (look at the code of /usr/lib/python3/dist-packages/HPSU/plugins/mqtt.py to find a template).
-Modificato rozzamente il file mqtt.py per permettere la pubblicazione dei dati su una coda pub/sub su GCP
-Da questa il dato (opportunamente formattato json) viene gestito da una cloud funtion e caricato su Big Query (ad esempio).
+### MQTT / Pub/Sub
+Invio dati verso MQTT o direttamente su Google Pub/Sub.
+- Configurazione in `/etc/pyHPSU/pyhpsu.conf`.
+- Sezione `[PUBSUB]` opzionale: se impostata (o usando le variabili `PUBSUB_PROJECT_ID` e `PUBSUB_TOPIC_ID`), il plugin `mqtt` pubblica JSON su Pub/Sub.
+- In assenza di `[PUBSUB]`, resta il comportamento MQTT esistente.
+
+Esempio di configurazione:
+```
+[PYHPSU]
+OUTPUT_TYPE = MQTT
+
+[PUBSUB]
+PROJECT_ID = your-gcp-project
+TOPIC_ID = your-topic
+```
+
+Autenticazione: impostare `GOOGLE_APPLICATION_CREDENTIALS` con un service account avente ruolo `pubsub.publisher`.
+
+## Comandi utili / Deploy
+
+### Pub/Sub e BigQuery
+- Creare il topic Pub/Sub (sostituire `PROJECT` e `TOPIC`):
+```
+gcloud pubsub topics create TOPIC --project=PROJECT
+```
+
+- Impostare l'autenticazione sul nodo che invia: esportare `GOOGLE_APPLICATION_CREDENTIALS` e variabili `PUBSUB_PROJECT_ID` e `PUBSUB_TOPIC_ID` se non si usa la sezione `[PUBSUB]` del conf.
+
+### Cloud Function (Pub/Sub -> BigQuery)
+Nel repo è presente `gcp/functions/pubsub_to_bigquery`.
+
+Deploy (Gen2, Python 3.12):
+```
+gcloud functions deploy handle_pubsub \
+  --gen2 --region=europe-west1 --runtime=python312 \
+  --trigger-topic=TOPIC \
+  --source=gcp/functions/pubsub_to_bigquery \
+  --entry-point=handle_pubsub \
+  --set-env-vars=BQ_DATASET=hpsu,BQ_TABLE=readings
+```
+
+Lo schema BigQuery viene creato automaticamente se mancante con colonne `event_time`, `message_id`, `metric`, `value`, `src_time`, `ingested_at`.
 
 ### OPENHAB
 Send the data to openHAB. Create an item for every command you want to use. You have to use a Prefix like `Rotex_` for all pyHPSU related item names. So pyHPSU will push every value to a item named [Prefix][command].
