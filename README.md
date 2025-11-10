@@ -100,10 +100,41 @@ Send the data to the InfluxDB Time Series database.
 Configure it in /etc/pyHPSU/pyhpsu.conf (look at the code of /usr/lib/python3/dist-packages/HPSU/plugins/influxdb.py to find a template).
 
 ### MQTT
-Send the data to an MQTT broker.
-Configure it in /etc/pyHPSU/pyhpsu.conf (look at the code of /usr/lib/python3/dist-packages/HPSU/plugins/mqtt.py to find a template).
-Modificato rozzamente il file mqtt.py per permettere la pubblicazione dei dati su una coda pub/sub su GCP
-Da questa il dato (opportunamente formattato json) viene gestito da una cloud funtion e caricato su Big Query (ad esempio).
+Send the data to an MQTT broker and/or Google Cloud Pub/Sub.
+
+**⚠️ IMPORTANTE: Google Cloud IoT Core è stato deprecato (16 agosto 2023)**
+
+Il plugin MQTT è stato aggiornato per utilizzare **Google Cloud Pub/Sub** invece di Google Cloud IoT Core.
+
+#### Caratteristiche:
+- ✅ Supporto per Google Cloud Pub/Sub (API moderne)
+- ✅ Autenticazione con Service Account
+- ✅ MQTT locale opzionale
+- ✅ Formato JSON strutturato
+- ✅ Facile integrazione con BigQuery tramite Cloud Functions
+
+#### Installazione:
+```bash
+# Installa le dipendenze GCP
+pip install -r requirements_gcp.txt
+```
+
+#### Configurazione:
+Vedi la **[Guida alla Migrazione GCP](GCP_MIGRATION_GUIDE.md)** per istruzioni dettagliate.
+
+Esempio configurazione in `/etc/pyHPSU/pyhpsu.conf`:
+```ini
+[GCP_PUBSUB]
+ENABLED = true
+PROJECT_ID = your-project-id
+TOPIC_ID = hpsu-telemetry
+DEVICE_ID = hpsu-001
+CREDENTIALS_FILE = /etc/pyHPSU/keys/service-account.json
+```
+
+#### Documentazione:
+- 📖 [GCP_MIGRATION_GUIDE.md](GCP_MIGRATION_GUIDE.md) - Guida completa alla configurazione
+- 📋 [pyhpsu_gcp.conf.example](etc/pyHPSU/pyhpsu_gcp.conf.example) - File di configurazione di esempio
 
 ### OPENHAB
 Send the data to openHAB. Create an item for every command you want to use. You have to use a Prefix like `Rotex_` for all pyHPSU related item names. So pyHPSU will push every value to a item named [Prefix][command].

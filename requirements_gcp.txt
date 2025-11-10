@@ -1,0 +1,22 @@
+# Requisiti per pyHPSU con Google Cloud Pub/Sub
+# Installa con: pip install -r requirements_gcp.txt
+
+# Google Cloud Pub/Sub (obbligatorio per GCP)
+google-cloud-pubsub>=2.18.0
+
+# Autenticazione Google Cloud
+google-auth>=2.23.0
+
+# MQTT locale (opzionale)
+paho-mqtt>=1.6.0
+
+# Dipendenze base pyHPSU
+python-can>=4.0.0
+pyserial>=3.5
+pika>=1.3.0
+requests>=2.31.0
+
+# Plugin specifici (opzionali)
+# mysql-connector-python>=8.0.0  # Per plugin MySQL
+# urllib3>=2.0.0                 # Per plugin Homematic
+# influxdb>=5.3.0                # Per plugin InfluxDB

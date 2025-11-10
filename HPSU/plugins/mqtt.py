@@ -1,777 +1,292 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+Plugin MQTT per pyHPSU - Versione aggiornata con Google Cloud Pub/Sub
 
+Questo plugin invia i dati della pompa di calore a Google Cloud Pub/Sub.
+Google Cloud IoT Core è stato deprecato il 16 agosto 2023.
 
-# [START iot_mqtt_includes]
-import argparse
-import datetime
-import logging
-import os
-import random
-import ssl
-import time
+Requisiti:
+- pip install google-cloud-pubsub
+- Autenticazione tramite Service Account JSON
 
-import jwt
-import paho.mqtt.client as mqtt
+Configurazione in pyhpsu.conf:
+[MQTT]
+# Configurazione locale MQTT (opzionale)
+BROKER = localhost
+PORT = 1883
+CLIENTNAME = rotex_hpsu
+PREFIX = rotex
+QOS = 0
 
-# [END iot_mqtt_includes]
-
-
-# config inf conf_file (defaults):
-# [MQTT]
-# BROKER = localhost
-# PORT = 1883
-# USERNAME = 
-# PASSWORD = 
-# CLIENTNAME = rotex_hpsu
-# PREFIX = rotex
+[GCP_PUBSUB]
+# Configurazione Google Cloud Pub/Sub
+PROJECT_ID = your-project-id
+TOPIC_ID = your-topic-id
+# Percorso al file JSON del service account
+CREDENTIALS_FILE = /path/to/service-account.json
+# Opzionale: abilita pubblicazione su GCP (true/false)
+ENABLED = true
+"""
 
 import configparser
-import requests
-import sys
+import datetime
+import json
+import logging
 import os
-import paho.mqtt.publish as publish
-import paho.mqtt.client as mqtt
+import sys
+from typing import Optional, Dict, Any
 
-algorithm='ES256' 
-#ca_certs='/home/pi/python-docs-samples/iot/api-client/mqtt_example/keys/roots.pem' 
-ca_certs='/usr/lib/python3/dist-packages/HPSU/plugins/keys/roots.pem' 
-cloud_region='us-central1' 
-data='Hello there' 
-device_id='wio' 
-gateway_id=None 
-jwt_expires_minutes=1 
-listen_dur=60 
-message_type='event' 
-mqtt_bridge_hostname='mqtt.googleapis.com' 
-mqtt_bridge_port=8883 
-num_messages=1 
-private_key_file='/usr/lib/python3/dist-packages/HPSU/plugins/keys/ec_private.pem'
-project_id='wio-cloud-335307' 
-registry_id='wio-register' 
-service_account_json=None 
-command=None
+# Import per MQTT locale (opzionale)
+try:
+    import paho.mqtt.client as mqtt
+    MQTT_AVAILABLE = True
+except ImportError:
+    MQTT_AVAILABLE = False
+    logging.warning("paho-mqtt non disponibile. Funzionalità MQTT locale disabilitata.")
 
-#################################################################
+# Import per Google Cloud Pub/Sub
+try:
+    from google.cloud import pubsub_v1
+    from google.oauth2 import service_account
+    PUBSUB_AVAILABLE = True
+except ImportError:
+    PUBSUB_AVAILABLE = False
+    logging.warning("google-cloud-pubsub non disponibile. Funzionalità GCP Pub/Sub disabilitata.")
+
+# Configurazione logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 class export():
-    hpsu = None
+    """Classe per esportare i dati HPSU via MQTT locale e/o Google Cloud Pub/Sub"""
 
     def __init__(self, hpsu=None, logger=None, config_file=None):
+        """
+        Inizializza l'exporter MQTT/Pub/Sub
+
+        Args:
+            hpsu: Istanza HPSU
+            logger: Logger personalizzato (opzionale)
+            config_file: Percorso al file di configurazione
+        """
         self.hpsu = hpsu
-        self.logger = logger
+        self.logger = logger or logging.getLogger(__name__)
         self.config_file = config_file
         self.config = configparser.ConfigParser()
-        if os.path.isfile(self.config_file):
-            self.config.read(self.config_file)
-        else:
+
+        if not os.path.isfile(self.config_file):
+            self.logger.error(f"File di configurazione non trovato: {self.config_file}")
             sys.exit(9)
 
-        # MQTT hostname or IP
-        if self.config.has_option('MQTT', 'BROKER'):
-            self.brokerhost = self.config['MQTT']['BROKER']
-        else:
-            self.brokerhost = 'localhost'
+        self.config.read(self.config_file)
 
-        # MQTT broker port
-        if self.config.has_option('MQTT', 'PORT'):
-            self.brokerport = int(self.config['MQTT']['PORT'])
-        else:
-            self.brokerport = 1883
+        # Inizializza MQTT locale
+        self._init_local_mqtt()
 
-        # MQTT client name
-        if self.config.has_option('MQTT', 'CLIENTNAME'):
-            self.clientname = self.config['MQTT']['CLIENTNAME']
-        else:
-            self.clientname = 'rotex'
-        # MQTT Username
-        #if self.config.has_option('MQTT', 'USERNAME'):
-        #    self.username = self.config['MQTT']['USERNAME']
-        #else:
-        #    self.username = None
-        #    print("Username not set!!!!!")
+        # Inizializza Google Cloud Pub/Sub
+        self._init_gcp_pubsub()
 
-        #MQTT Password
-        #if self.config.has_option('MQTT', "PASSWORD"):
-        #else:
-        #    self.password="None"
+    def _init_local_mqtt(self):
+        """Inizializza il client MQTT locale (opzionale)"""
+        self.mqtt_enabled = False
+        self.mqtt_client = None
 
-        #MQTT Prefix
-        if self.config.has_option('MQTT', "PREFIX"):
-            self.prefix = self.config['MQTT']['PREFIX']
-        else:
-            self.prefix = ""
+        if not MQTT_AVAILABLE:
+            self.logger.info("MQTT locale non disponibile (paho-mqtt non installato)")
+            return
 
-        #MQTT QOS
-        if self.config.has_option('MQTT', "QOS"):
-            self.qos = self.config['MQTT']['QOS']
-        else:
-            self.qos = "0"
-        self.client=mqtt.Client(self.clientname)
-        #self.client.on_publish = self.on_publish()
-        #if self.username:
-        #   self.client.username_pw_set(self.username, password=self.password)
-        #self.client.enable_logger()
+        if not self.config.has_section('MQTT'):
+            self.logger.info("Sezione [MQTT] non presente nel config. MQTT locale disabilitato.")
+            return
 
+        # Configurazione MQTT locale
+        self.brokerhost = self.config.get('MQTT', 'BROKER', fallback='localhost')
+        self.brokerport = self.config.getint('MQTT', 'PORT', fallback=1883)
+        self.clientname = self.config.get('MQTT', 'CLIENTNAME', fallback='rotex_hpsu')
+        self.prefix = self.config.get('MQTT', 'PREFIX', fallback='rotex')
+        self.qos = self.config.getint('MQTT', 'QOS', fallback=0)
 
+        try:
+            self.mqtt_client = mqtt.Client(self.clientname)
+            self.mqtt_enabled = True
+            self.logger.info(f"MQTT locale configurato: {self.brokerhost}:{self.brokerport}")
+        except Exception as e:
+            self.logger.error(f"Errore inizializzazione MQTT locale: {e}")
+
+    def _init_gcp_pubsub(self):
+        """Inizializza Google Cloud Pub/Sub"""
+        self.pubsub_enabled = False
+        self.publisher = None
+        self.topic_path = None
+
+        if not PUBSUB_AVAILABLE:
+            self.logger.warning("Google Cloud Pub/Sub non disponibile (google-cloud-pubsub non installato)")
+            self.logger.warning("Installa con: pip install google-cloud-pubsub")
+            return
+
+        if not self.config.has_section('GCP_PUBSUB'):
+            self.logger.info("Sezione [GCP_PUBSUB] non presente nel config. Pub/Sub disabilitato.")
+            return
+
+        # Verifica se Pub/Sub è abilitato
+        enabled = self.config.get('GCP_PUBSUB', 'ENABLED', fallback='false')
+        if enabled.lower() not in ['true', '1', 'yes']:
+            self.logger.info("GCP Pub/Sub disabilitato nella configurazione")
+            return
+
+        # Leggi configurazione
+        project_id = self.config.get('GCP_PUBSUB', 'PROJECT_ID', fallback=None)
+        topic_id = self.config.get('GCP_PUBSUB', 'TOPIC_ID', fallback=None)
+        credentials_file = self.config.get('GCP_PUBSUB', 'CREDENTIALS_FILE', fallback=None)
+
+        if not project_id or not topic_id:
+            self.logger.error("PROJECT_ID e TOPIC_ID sono obbligatori in [GCP_PUBSUB]")
+            return
+
+        try:
+            # Inizializza il publisher con o senza credentials file
+            if credentials_file and os.path.exists(credentials_file):
+                credentials = service_account.Credentials.from_service_account_file(credentials_file)
+                self.publisher = pubsub_v1.PublisherClient(credentials=credentials)
+                self.logger.info(f"Pub/Sub autenticato con service account: {credentials_file}")
+            else:
+                # Usa le Application Default Credentials (ADC)
+                self.publisher = pubsub_v1.PublisherClient()
+                self.logger.info("Pub/Sub usa Application Default Credentials")
+
+            self.topic_path = self.publisher.topic_path(project_id, topic_id)
+            self.pubsub_enabled = True
+            self.logger.info(f"GCP Pub/Sub configurato: {self.topic_path}")
+
+        except Exception as e:
+            self.logger.error(f"Errore inizializzazione Google Cloud Pub/Sub: {e}")
+            self.logger.error("Verifica che il service account abbia i permessi 'pubsub.publisher'")
 
     def pushValues(self, vars=None):
+        """
+        Pubblica i valori su MQTT locale e/o Google Cloud Pub/Sub
 
-        #self.msgs=[]
-        stringatempo = str(datetime.datetime.now())
-        stringa="{\"time\":"+"\""+stringatempo+"\""+","
-        fine="}"
-        h=0
-        vv="\""
+        Args:
+            vars: Lista di dizionari con 'name' e 'resp'
+        """
+        if not vars:
+            self.logger.warning("Nessun valore da pubblicare")
+            return
 
-        for r in vars:
-	
-            msgs=[]
+        # Costruisce il payload JSON
+        timestamp = datetime.datetime.now(datetime.timezone.utc)
 
-            if (h==0):
-                stringa = stringa+vv+str(r['name'])+vv+":"+vv+str(r['resp'])+vv 
-                h=1
+        # Formato payload
+        payload = {
+            "timestamp": timestamp.isoformat(),
+            "device_id": self.config.get('GCP_PUBSUB', 'DEVICE_ID', fallback='hpsu_device'),
+            "measurements": {}
+        }
+
+        for item in vars:
+            if 'name' in item and 'resp' in item:
+                payload["measurements"][item['name']] = str(item['resp'])
+
+        # Converte in JSON string
+        payload_str = json.dumps(payload, ensure_ascii=False)
+
+        # Log del payload
+        self.logger.info(f"Payload da pubblicare: {payload_str}")
+
+        # Pubblica su MQTT locale
+        if self.mqtt_enabled:
+            self._publish_mqtt_local(payload_str)
+
+        # Pubblica su Google Cloud Pub/Sub
+        if self.pubsub_enabled:
+            self._publish_pubsub(payload_str, payload)
+
+    def _publish_mqtt_local(self, payload_str: str):
+        """Pubblica su broker MQTT locale"""
+        try:
+            if not self.mqtt_client:
+                return
+
+            # Connetti al broker
+            self.mqtt_client.connect(self.brokerhost, self.brokerport, 60)
+
+            # Pubblica il messaggio
+            topic = f"{self.prefix}/hpsu/data"
+            result = self.mqtt_client.publish(topic, payload_str, qos=self.qos)
+
+            if result.rc == mqtt.MQTT_ERR_SUCCESS:
+                self.logger.info(f"Pubblicato su MQTT locale: {topic}")
             else:
-                stringa=stringa+","+vv+str(r['name'])+vv+":"+vv+str(r['resp'])+vv
-         
+                self.logger.error(f"Errore pubblicazione MQTT: {result.rc}")
 
-        stringa = stringa + fine 
-        print(stringa)
+            self.mqtt_client.disconnect()
 
-        mqtt_device_demo(stringa)
+        except Exception as e:
+            self.logger.error(f"Errore pubblicazione MQTT locale: {e}")
 
+    def _publish_pubsub(self, payload_str: str, payload_dict: Dict[str, Any]):
+        """Pubblica su Google Cloud Pub/Sub"""
+        try:
+            if not self.publisher or not self.topic_path:
+                return
 
-################################################################
-logging.getLogger("googleapiclient.discovery_cache").setLevel(logging.CRITICAL)
+            # Converti il payload in bytes
+            data = payload_str.encode('utf-8')
 
-# The initial backoff time after a disconnection occurs, in seconds.
-minimum_backoff_time = 1
+            # Aggiungi attributi del messaggio (opzionale, utile per filtering)
+            attributes = {
+                "device_id": payload_dict.get("device_id", "unknown"),
+                "timestamp": payload_dict.get("timestamp", ""),
+                "source": "pyHPSU"
+            }
 
-# The maximum backoff time before giving up, in seconds.
-MAXIMUM_BACKOFF_TIME = 32
-
-# Whether to wait with exponential backoff before publishing.
-should_backoff = False
-
-# [START iot_mqtt_jwt]
-def create_jwt(project_id, private_key_file, algorithm):
-    """Creates a JWT (https://jwt.io) to establish an MQTT connection.
-    Args:
-     project_id: The cloud project ID this device belongs to
-     private_key_file: A path to a file containing either an RSA256 or
-             ES256 private key.
-     algorithm: The encryption algorithm to use. Either 'RS256' or 'ES256'
-    Returns:
-        A JWT generated from the given project_id and private key, which
-        expires in 20 minutes. After 20 minutes, your client will be
-        disconnected, and a new JWT will have to be generated.
-    Raises:
-        ValueError: If the private_key_file does not contain a known key.
-    """
-
-    token = {
-        # The time that the token was issued at
-        "iat": datetime.datetime.now(tz=datetime.timezone.utc),
-        # The time the token expires.
-        "exp": datetime.datetime.now(tz=datetime.timezone.utc) + datetime.timedelta(minutes=20),
-        # The audience field should always be set to the GCP project id.
-        "aud": project_id,
-    }
-
-    # Read the private key file.
-    with open(private_key_file, "r") as f:
-        private_key = f.read()
-
-    print(
-        "Creating JWT using {} from private key file {}".format(
-            algorithm, private_key_file
-        )
-    )
-
-    return jwt.encode(token, private_key, algorithm=algorithm)
-
-
-# [END iot_mqtt_jwt]
-
-# [START iot_mqtt_config]
-def error_str(rc):
-    """Convert a Paho error to a human readable string."""
-    return "{}: {}".format(rc, mqtt.error_string(rc))
-
-
-def on_connect(unused_client, unused_userdata, unused_flags, rc):
-    """Callback for when a device connects."""
-    print("on_connect", mqtt.connack_string(rc))
-
-    # After a successful connect, reset backoff time and stop backing off.
-    global should_backoff
-    global minimum_backoff_time
-    should_backoff = False
-    minimum_backoff_time = 1
-
-
-def on_disconnect(unused_client, unused_userdata, rc):
-    """Paho callback for when a device disconnects."""
-    print("on_disconnect", error_str(rc))
-
-    # Since a disconnect occurred, the next loop iteration will wait with
-    # exponential backoff.
-    global should_backoff
-    should_backoff = True
-
-
-def on_publish(unused_client, unused_userdata, unused_mid):
-    """Paho callback when a message is sent to the broker."""
-    print("on_publish")
-
-
-def on_message(unused_client, unused_userdata, message):
-    """Callback when the device receives a message on a subscription."""
-    payload = str(message.payload.decode("utf-8"))
-    print(
-        "Received message '{}' on topic '{}' with Qos {}".format(
-            payload, message.topic, str(message.qos)
-        )
-    )
-
-
-
-def get_client(
-    project_id,
-    cloud_region,
-    registry_id,
-    device_id,
-    private_key_file,
-    algorithm,
-    ca_certs,
-    mqtt_bridge_hostname,
-    mqtt_bridge_port,
-):
-    """Create our MQTT client. The client_id is a unique string that identifies
-    this device. For Google Cloud IoT Core, it must be in the format below."""
-    client_id = "projects/{}/locations/{}/registries/{}/devices/{}".format(
-        project_id, cloud_region, registry_id, device_id
-    )
-    print("Device client_id is '{}'".format(client_id))
-
-    client = mqtt.Client(client_id=client_id)
-
-    # With Google Cloud IoT Core, the username field is ignored, and the
-    # password field is used to transmit a JWT to authorize the device.
-    client.username_pw_set(
-        username="unused", password=create_jwt(project_id, private_key_file, algorithm)
-    )
-
-    # Enable SSL/TLS support.
-    client.tls_set(ca_certs=ca_certs, tls_version=ssl.PROTOCOL_TLSv1_2)
-
-    # Register message callbacks. https://eclipse.org/paho/clients/python/docs/
-    # describes additional callbacks that Paho supports. In this example, the
-    # callbacks just print to standard out.
-    client.on_connect = on_connect
-    client.on_publish = on_publish
-    client.on_disconnect = on_disconnect
-    client.on_message = on_message
-
-    # Connect to the Google MQTT bridge.
-    client.connect(mqtt_bridge_hostname, mqtt_bridge_port)
-
-    # This is the topic that the device will receive configuration updates on.
-    mqtt_config_topic = "/devices/{}/config".format(device_id)
-
-    # Subscribe to the config topic.
-    client.subscribe(mqtt_config_topic, qos=1)
-
-    # The topic that the device will receive commands on.
-    mqtt_command_topic = "/devices/{}/commands/#".format(device_id)
-
-    # Subscribe to the commands topic, QoS 1 enables message acknowledgement.
-    print("Subscribing to {}".format(mqtt_command_topic))
-    client.subscribe(mqtt_command_topic, qos=0)
-
-    return client
-# [END iot_mqtt_config]
-
-
-def attach_device(client, device_id, auth):
-    """Attach the device to the gateway."""
-    # [START iot_attach_device]
-    attach_topic = "/devices/{}/attach".format(device_id)
-    attach_payload = '{{"authorization" : "{}"}}'.format(auth)
-    client.publish(attach_topic, attach_payload, qos=1)
-    # [END iot_attach_device]
-
-
-def listen_for_messages(
-    service_account_json,
-    project_id,
-    cloud_region,
-    registry_id,
-    device_id,
-    gateway_id,
-    num_messages,
-    private_key_file,
-    algorithm,
-    ca_certs,
-    mqtt_bridge_hostname,
-    mqtt_bridge_port,
-    jwt_expires_minutes,
-    duration,
-    cb=None,
-):
-    """Listens for messages sent to the gateway and bound devices."""
-    # [START iot_listen_for_messages]
-    global minimum_backoff_time
-
-    jwt_iat = datetime.datetime.now(tz=datetime.timezone.utc)
-    jwt_exp_mins = jwt_expires_minutes
-    # Use gateway to connect to server
-    client = get_client(
-        project_id,
-        cloud_region,
-        registry_id,
-        gateway_id,
-        private_key_file,
-        algorithm,
-        ca_certs,
-        mqtt_bridge_hostname,
-        mqtt_bridge_port,
-    )
-
-    attach_device(client, device_id, "")
-    print("Waiting for device to attach.")
-    time.sleep(5)
-
-    # The topic devices receive configuration updates on.
-    device_config_topic = "/devices/{}/config".format(device_id)
-    client.subscribe(device_config_topic, qos=1)
-    # The topic gateways receive configuration updates on.
-    gateway_config_topic = "/devices/{}/config".format(gateway_id)
-    client.subscribe(gateway_config_topic, qos=1)
-
-    # The topic gateways receive error updates on. QoS must be 0.
-    error_topic = "/devices/{}/errors".format(gateway_id)
-    client.subscribe(error_topic, qos=0)
-
-    # Wait for about a minute for config messages.
-    for i in range(1, duration):
-        client.loop()
-        if cb is not None:
-            cb(client)
-
-        if should_backoff:
-            # If backoff time is too large, give up.
-            if minimum_backoff_time > MAXIMUM_BACKOFF_TIME:
-                print("Exceeded maximum backoff time. Giving up.")
-                break
-
-            delay = minimum_backoff_time + random.randint(0, 1000) / 1000.0
-            time.sleep(delay)
-            minimum_backoff_time *= 2
-            client.connect(mqtt_bridge_hostname, mqtt_bridge_port)
-
-        seconds_since_issue = (datetime.datetime.now(tz=datetime.timezone.utc) - jwt_iat).seconds
-        if seconds_since_issue > 60 * jwt_exp_mins:
-            print("Refreshing token after {}s".format(seconds_since_issue))
-            jwt_iat = datetime.datetime.now(tz=datetime.timezone.utc)
-            client.loop()
-            client.disconnect()
-            client = get_client(
-                project_id,
-                cloud_region,
-                registry_id,
-                gateway_id,
-                private_key_file,
-                algorithm,
-                ca_certs,
-                mqtt_bridge_hostname,
-                mqtt_bridge_port,
+            # Pubblica il messaggio
+            future = self.publisher.publish(
+                self.topic_path,
+                data,
+                **attributes
             )
 
-        time.sleep(1)
+            # Attendi la conferma (opzionale, commentare per operazione asincrona)
+            message_id = future.result(timeout=10)
 
-    detach_device(client, device_id)
+            self.logger.info(f"Pubblicato su Pub/Sub - Message ID: {message_id}")
 
-    print("Finished.")
-    # [END iot_listen_for_messages]
-
-
-
-def send_data_from_bound_device(
-    service_account_json,
-    project_id,
-    cloud_region,
-    registry_id,
-    device_id,
-    gateway_id,
-    num_messages,
-    private_key_file,
-    algorithm,
-    ca_certs,
-    mqtt_bridge_hostname,
-    mqtt_bridge_port,
-    jwt_expires_minutes,
-    payload,
-):
+        except Exception as e:
+            self.logger.error(f"Errore pubblicazione Google Cloud Pub/Sub: {e}")
+            import traceback
+            self.logger.error(traceback.format_exc())
 
 
-    """Sends data from a gateway on behalf of a device that is bound to it."""
-    # [START send_data_from_bound_device]
-    global minimum_backoff_time
+# Funzione di test
+def test_pubsub():
+    """Funzione di test per verificare la configurazione"""
+    import sys
 
-    # Publish device events and gateway state.
-    device_topic = "/devices/{}/{}".format(device_id, "state")
-    gateway_topic = "/devices/{}/{}".format(gateway_id, "state")
+    if len(sys.argv) < 2:
+        print("Uso: python mqtt.py <config_file>")
+        sys.exit(1)
 
-    jwt_iat = datetime.datetime.now(tz=datetime.timezone.utc)
-    jwt_exp_mins = jwt_expires_minutes
-    # Use gateway to connect to server
-    client = get_client(
-        project_id,
-        cloud_region,
-        registry_id,
-        gateway_id,
-        private_key_file,
-        algorithm,
-        ca_certs,
-        mqtt_bridge_hostname,
-        mqtt_bridge_port,
-    )
+    config_file = sys.argv[1]
 
-    attach_device(client, device_id, "")
-    print("Waiting for device to attach.")
-    time.sleep(5)
+    # Crea un'istanza del plugin
+    exporter = export(hpsu=None, logger=None, config_file=config_file)
 
-    # Publish state to gateway topic
-    gateway_state = "Starting gateway at: {}".format(time.time())
-    print(gateway_state)
-    client.publish(gateway_topic, gateway_state)
+    # Dati di test
+    test_data = [
+        {"name": "t_hs", "resp": "32.5"},
+        {"name": "t_dhw", "resp": "45.0"},
+        {"name": "water_pressure", "resp": "1.8"},
+    ]
 
-    # Publish num_messages messages to the MQTT bridge
-    for i in range(1, num_messages + 1):
-        client.loop()
-
-        if should_backoff:
-            # If backoff time is too large, give up.
-            if minimum_backoff_time > MAXIMUM_BACKOFF_TIME:
-                print("Exceeded maximum backoff time. Giving up.")
-                break
-
-            delay = minimum_backoff_time + random.randint(0, 1000) / 1000.0
-            time.sleep(delay)
-            minimum_backoff_time *= 2
-            client.connect(mqtt_bridge_hostname, mqtt_bridge_port)
-
-        payload = "{}/{}-{}-payload-{}".format(registry_id, gateway_id, device_id, i)
-
-        print(
-            "Publishing message {}/{}: '{}' to {}".format(
-                i, num_messages, payload, device_topic
-            )
-        )
-        client.publish(device_topic, "{} : {}".format(device_id, payload))
-
-        seconds_since_issue = (datetime.datetime.now(tz=datetime.timezone.utc) - jwt_iat).seconds
-        if seconds_since_issue > 60 * jwt_exp_mins:
-            print("Refreshing token after {}s").format(seconds_since_issue)
-            jwt_iat = datetime.datetime.now(tz=datetime.timezone.utc)
-            client = get_client(
-                project_id,
-                cloud_region,
-                registry_id,
-                gateway_id,
-                private_key_file,
-                algorithm,
-                ca_certs,
-                mqtt_bridge_hostname,
-                mqtt_bridge_port,
-            )
-
-        time.sleep(5)
-
-    detach_device(client, device_id)
-
-    print("Finished.")
-    # [END send_data_from_bound_device]
+    # Pubblica i dati di test
+    print("\nTest pubblicazione dati...")
+    exporter.pushValues(test_data)
+    print("\nTest completato!")
 
 
-
-
-def parse_command_line_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description=("Example Google Cloud IoT Core MQTT device connection code.")
-    )
-    parser.add_argument(
-        "--algorithm",
-        choices=("RS256", "ES256"),
-        required=True,
-        help="Which encryption algorithm to use to generate the JWT.",
-    )
-    parser.add_argument(
-        "--ca_certs",
-        default="roots.pem",
-        help="CA root from https://pki.google.com/roots.pem",
-    )
-    parser.add_argument(
-        "--cloud_region", default="us-central1", help="GCP cloud region"
-    )
-    parser.add_argument(
-        "--data",
-        default="Hello there",
-        help="The telemetry data sent on behalf of a device",
-    )
-    parser.add_argument("--device_id", required=True, help="Cloud IoT Core device id")
-    parser.add_argument("--gateway_id", required=False, help="Gateway identifier.")
-    parser.add_argument(
-        "--jwt_expires_minutes",
-        default=20,
-        type=int,
-        help="Expiration time, in minutes, for JWT tokens.",
-    )
-    parser.add_argument(
-        "--listen_dur",
-        default=60,
-        type=int,
-        help="Duration (seconds) to listen for configuration messages",
-    )
-    parser.add_argument(
-        "--message_type",
-        choices=("event", "state"),
-        default="event",
-        help=(
-            "Indicates whether the message to be published is a "
-            "telemetry event or a device state message."
-        ),
-    )
-    parser.add_argument(
-        "--mqtt_bridge_hostname",
-        default="mqtt.googleapis.com",
-        help="MQTT bridge hostname.",
-    )
-    parser.add_argument(
-        "--mqtt_bridge_port",
-        choices=(8883, 443),
-        default=8883,
-        type=int,
-        help="MQTT bridge port.",
-    )
-    parser.add_argument(
-        "--num_messages", type=int, default=100, help="Number of messages to publish."
-    )
-    parser.add_argument(
-        "--private_key_file", required=True, help="Path to private key file."
-    )
-    parser.add_argument(
-        "--project_id",
-        default=os.environ.get("GOOGLE_CLOUD_PROJECT"),
-        help="GCP cloud project name",
-    )
-    parser.add_argument(
-        "--registry_id", required=True, help="Cloud IoT Core registry id"
-    )
-    parser.add_argument(
-        "--service_account_json",
-        default=os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"),
-        help="Path to service account json file.",
-    )
-
-    # Command subparser
-    command = parser.add_subparsers(dest="command")
-
-    command.add_parser("device_demo", help=mqtt_device_demo.__doc__)
-
-    command.add_parser("gateway_send", help=send_data_from_bound_device.__doc__)
-
-    command.add_parser("gateway_listen", help=listen_for_messages.__doc__)
-
-    return parser.parse_args()
-
-
-
-
-def mqtt_device_demo(stringa_payload):
-    """Connects a device, sends data, and receives data."""
-    # [START iot_mqtt_run]
-    global minimum_backoff_time
-    global MAXIMUM_BACKOFF_TIME
-
-    # Publish to the events or state topic based on the flag.
-    #sub_topic = "events" if args.message_type == "event" else "state"
-    sub_topic = "events" if message_type == "event" else "state"
-
-    #mqtt_topic = "/devices/{}/{}".format(args.device_id, sub_topic)
-    mqtt_topic = "/devices/{}/{}".format(device_id, sub_topic)
-
-    jwt_iat = datetime.datetime.now(tz=datetime.timezone.utc)
-    #jwt_exp_mins = args.jwt_expires_minutes
-    jwt_exp_mins = jwt_expires_minutes
-#    client = get_client(
-#        args.project_id,
-#        args.cloud_region,
-#        args.registry_id,
-#        args.device_id,
-#        args.private_key_file,
-#        args.algorithm,
-#        args.ca_certs,
-#        args.mqtt_bridge_hostname,
-#        args.mqtt_bridge_port,
-##    )
-
-    client = get_client(
-        project_id,
-        cloud_region,
-        registry_id,
-        device_id,
-        private_key_file,
-        algorithm,
-        ca_certs,
-        mqtt_bridge_hostname,
-        mqtt_bridge_port,
-    )
-
-
-
-    # Publish num_messages messages to the MQTT bridge once per second.
-#    for i in range(1, args.num_messages + 1):
-    for i in range(1, num_messages + 1):
-        # Process network events.
-        client.loop()
-
-        # Wait if backoff is required.
-        if should_backoff:
-            # If backoff time is too large, give up.
-            if minimum_backoff_time > MAXIMUM_BACKOFF_TIME:
-                print("Exceeded maximum backoff time. Giving up.")
-                break
-
-            # Otherwise, wait and connect again.
-            delay = minimum_backoff_time + random.randint(0, 1000) / 1000.0
-            print("Waiting for {} before reconnecting.".format(delay))
-            time.sleep(delay)
-            minimum_backoff_time *= 2
-            #client.connect(args.mqtt_bridge_hostname, args.mqtt_bridge_port)
-            client.connect(args.mqtt_bridge_hostname, mqtt_bridge_port)
-
-       # payload = "{}/{}-payload-{}".format(args.registry_id, args.device_id, i)
-       # print("Publishing message {}/{}: '{}'".format(i, args.num_messages, payload))
-
-
-        # [START iot_mqtt_jwt_refresh]
-        seconds_since_issue = (datetime.datetime.now(tz=datetime.timezone.utc) - jwt_iat).seconds
-        if seconds_since_issue > 60 * jwt_exp_mins:
-            print("Refreshing token after {}s".format(seconds_since_issue))
-            jwt_iat = datetime.datetime.now(tz=datetime.timezone.utc)
-            client.loop()
-            client.disconnect()
-#            client = get_client(
-#                args.project_id,
-#                args.cloud_region,
-#                args.registry_id,
-#                args.device_id,
-#                args.private_key_file,
-#                args.algorithm,
-#                args.ca_certs,
-#                args.mqtt_bridge_hostname,
-#                args.mqtt_bridge_port,
-#            )
-            client = get_client(
-                project_id,
-                cloud_region,
-                registry_id,
-                device_id,
-                private_key_file,
-                algorithm,
-                ca_certs,
-                mqtt_bridge_hostname,
-                mqtt_bridge_port,
-            )
-
-
-
-        # [END iot_mqtt_jwt_refresh]
-        # Publish "payload" to the MQTT topic. qos=1 means at least once
-        # delivery. Cloud IoT Core also supports qos=0 for at most once
-        # delivery.
-
-        ##MODIFICA
-
-        client.publish(mqtt_topic,stringa_payload,qos=1)
-
-        print("----- pubblicato ------")
-        print(stringa_payload)
-
-        client.disconnect()
-        ### fine modifica #################
-        # Send events every second. State should not be updated as often
-#        for i in range(0, 2):
-#            time.sleep(1)
-#            client.loop()
-    # [END iot_mqtt_run]
-
-
-
-
-#def main():
-#    args = parse_command_line_args()
-#
-#    ### MODIFICA ###
-#
-#    print(args)
-#
-#
-#    ## fine modifica ###
-#
-#    if args.command and args.command.startswith("gateway"):
-#        if args.gateway_id is None:
-#            print("Error: For gateway commands you must specify a gateway ID")
-#            return
-#
-#    if args.command == "gateway_listen":
-#        listen_for_messages(
-#            args.service_account_json,
-#            args.project_id,
-#            args.cloud_region,
-#            args.registry_id,
-#            args.device_id,
-#            args.gateway_id,
-#            args.num_messages,
-#            args.private_key_file,
-#            args.algorithm,
-#            args.ca_certs,
-#            args.mqtt_bridge_hostname,
-#            args.mqtt_bridge_port,
-#            args.jwt_expires_minutes,
-#            args.listen_dur,
-#        )
-#        return
-#    elif args.command == "gateway_send":
-#        send_data_from_bound_device(
-#            args.service_account_json,
-#            args.project_id,
-#            args.cloud_region,
-#            args.registry_id,
-#            args.device_id,
-#            args.gateway_id,
-#            args.num_messages,
-##            args.private_key_file,
-#            args.algorithm,
-#            args.ca_certs,
-#            args.mqtt_bridge_hostname,
-#            args.mqtt_bridge_port,
-#            args.jwt_expires_minutes,
-#            args.data,
-#        )
-#        return
-#    else:
-#        mqtt_device_demo(args)
-#    print("Finished.")
-#
-#
-#if __name__ == "__main__":
-#    main()
-#
-
-
-
-   
+if __name__ == "__main__":
+    test_pubsub()
