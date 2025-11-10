@@ -1,0 +1,32 @@
+# This file specifies files that are *not* uploaded to Google Cloud
+# using gcloud. It follows the same syntax as .gitignore.
+
+.gcloudignore
+.git
+.gitignore
+*.pyc
+*.pyo
+*.pyd
+__pycache__
+.pytest_cache
+.coverage
+*.so
+*.egg
+*.egg-info
+dist
+build
+*.bak
+
+# README is not needed in the function
+README.md
+
+# Deploy script is not needed in the function
+deploy.sh
+
+# IDE files
+.vscode
+.idea
+*.swp
+*.swo
+*~
+.DS_Store

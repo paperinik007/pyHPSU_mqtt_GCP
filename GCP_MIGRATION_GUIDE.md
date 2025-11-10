@@ -166,55 +166,138 @@ Questi attributi possono essere usati per filtrare i messaggi nelle subscription
 
 ## Integrazione con BigQuery
 
-### Esempio di Cloud Function per BigQuery
+### Setup Completo (Gratuito!)
 
-Crea una Cloud Function che inserisce automaticamente i dati in BigQuery:
+Il progetto include una **Cloud Function completa** già pronta che:
+- Riceve automaticamente i dati da Pub/Sub
+- Li inserisce in BigQuery con schema ottimizzato
+- È configurata per rimanere **completamente nel tier gratuito**
 
-```python
-import json
-from google.cloud import bigquery
+#### Costi Stimati
 
-def pubsub_to_bigquery(event, context):
-    """Triggered from a message on a Cloud Pub/Sub topic."""
+Con 1 dispositivo HPSU (messaggio ogni 30 secondi):
 
-    # Decodifica il messaggio
-    pubsub_message = json.loads(base64.b64decode(event['data']).decode('utf-8'))
+| Servizio | Utilizzo/mese | Tier Gratuito | Costo |
+|----------|---------------|---------------|-------|
+| Cloud Functions | ~86,400 invocazioni | 2M invocazioni | **$0.00** |
+| BigQuery Storage | ~2-3 MB | 10 GB | **$0.00** |
+| BigQuery Query | Dipende | 1 TB processati | **$0.00** |
+| Pub/Sub | ~0.5 GB | 10 GB | **$0.00** |
 
-    # Client BigQuery
-    client = bigquery.Client()
-    table_id = "your-project.hpsu_dataset.telemetry"
+**Totale: $0.00/mese** 🎉
 
-    # Prepara i dati per BigQuery
-    rows_to_insert = [{
-        "timestamp": pubsub_message["timestamp"],
-        "device_id": pubsub_message["device_id"],
-        **pubsub_message["measurements"]
-    }]
+### Quick Start BigQuery
 
-    # Inserisci in BigQuery
-    errors = client.insert_rows_json(table_id, rows_to_insert)
+#### 1. Crea Dataset e Tabella
 
-    if errors:
-        print(f"Errors: {errors}")
-    else:
-        print("Data inserted successfully")
+```bash
+cd bigquery
+./create_dataset.sh your-project-id
 ```
 
-### Schema BigQuery Esempio
+Questo script crea:
+- Dataset `hpsu_data`
+- Tabella `telemetry` con schema completo
+- Partitioning per query veloci
+- Opzionalmente, data retention policy
+
+#### 2. Deploy Cloud Function
+
+```bash
+cd cloud-function
+./deploy.sh your-project-id europe-west1
+```
+
+Parametri:
+- `your-project-id`: Il tuo GCP project ID
+- `europe-west1`: Region più vicina (o `us-central1`, `asia-northeast1`)
+
+#### 3. Testa
+
+```bash
+# Pubblica un messaggio di test
+gcloud pubsub topics publish hpsu-telemetry \
+  --message='{"timestamp":"2025-11-10T10:30:00+00:00","device_id":"test","measurements":{"t_hs":"32.5"}}'
+
+# Controlla i log
+gcloud functions logs read hpsu-to-bigquery --region=europe-west1 --limit=50
+
+# Query i dati
+bq query --use_legacy_sql=false \
+  'SELECT * FROM `your-project-id.hpsu_data.telemetry` ORDER BY timestamp DESC LIMIT 10'
+```
+
+### Schema BigQuery
+
+La tabella include tutti i campi HPSU comuni:
 
 ```sql
-CREATE TABLE `your-project.hpsu_dataset.telemetry` (
-  timestamp TIMESTAMP,
-  device_id STRING,
-  t_hs FLOAT64,
-  t_dhw FLOAT64,
-  water_pressure FLOAT64,
-  t_ext FLOAT64,
-  t_return FLOAT64,
-  flow_rate FLOAT64,
-  t_hc FLOAT64
-);
+CREATE TABLE `your-project-id.hpsu_data.telemetry` (
+  timestamp TIMESTAMP NOT NULL,          -- Chiave di partitioning
+  device_id STRING NOT NULL,             -- Chiave di clustering
+  t_hs FLOAT64,                          -- Temperatura mandata riscaldamento
+  t_hs_set FLOAT64,                      -- Setpoint mandata
+  t_dhw FLOAT64,                         -- Temperatura ACS
+  t_dhw_set FLOAT64,                     -- Setpoint ACS
+  t_ext FLOAT64,                         -- Temperatura esterna
+  t_return FLOAT64,                      -- Temperatura ritorno
+  t_hc FLOAT64,                          -- Temperatura circuito
+  t_hc_set FLOAT64,                      -- Setpoint circuito
+  water_pressure FLOAT64,                -- Pressione acqua
+  flow_rate FLOAT64,                     -- Portata
+  mode STRING,                           -- Modalità operativa
+  error_code STRING,                     -- Codice errore
+  additional_data STRING                 -- Altri dati (JSON)
+)
+PARTITION BY DATE(timestamp)
+CLUSTER BY device_id, timestamp;
 ```
+
+### Query di Esempio
+
+#### Temperature medie ultime 24 ore
+
+```sql
+SELECT
+  AVG(t_hs) as avg_mandata,
+  AVG(t_dhw) as avg_acs,
+  AVG(t_ext) as avg_esterna
+FROM `your-project-id.hpsu_data.telemetry`
+WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+```
+
+#### Andamento settimanale
+
+```sql
+SELECT
+  DATE(timestamp) as giorno,
+  ROUND(AVG(t_hs), 1) as temp_media,
+  ROUND(MIN(t_hs), 1) as temp_min,
+  ROUND(MAX(t_hs), 1) as temp_max
+FROM `your-project-id.hpsu_data.telemetry`
+WHERE timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+GROUP BY giorno
+ORDER BY giorno DESC
+```
+
+#### Allarme pressione bassa
+
+```sql
+SELECT timestamp, water_pressure
+FROM `your-project-id.hpsu_data.telemetry`
+WHERE water_pressure < 1.0
+  AND timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+ORDER BY timestamp DESC
+```
+
+### Documentazione Completa
+
+Vedi **[cloud-function/README.md](cloud-function/README.md)** per:
+- Istruzioni dettagliate di setup
+- Configurazione avanzata
+- Query di esempio avanzate
+- Troubleshooting
+- Monitoring e alerting
 
 ## Troubleshooting
 

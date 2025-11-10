@@ -1,0 +1,92 @@
+[
+  {
+    "name": "timestamp",
+    "type": "TIMESTAMP",
+    "mode": "REQUIRED",
+    "description": "Timestamp della misurazione in formato ISO 8601"
+  },
+  {
+    "name": "device_id",
+    "type": "STRING",
+    "mode": "REQUIRED",
+    "description": "ID univoco del dispositivo HPSU"
+  },
+  {
+    "name": "t_hs",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura mandata riscaldamento (°C)"
+  },
+  {
+    "name": "t_hs_set",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura setpoint mandata riscaldamento (°C)"
+  },
+  {
+    "name": "t_dhw",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura acqua calda sanitaria (°C)"
+  },
+  {
+    "name": "t_dhw_set",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura setpoint acqua calda sanitaria (°C)"
+  },
+  {
+    "name": "t_ext",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura esterna (°C)"
+  },
+  {
+    "name": "t_return",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura ritorno (°C)"
+  },
+  {
+    "name": "t_hc",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura circuito riscaldamento (°C)"
+  },
+  {
+    "name": "t_hc_set",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Temperatura setpoint circuito riscaldamento (°C)"
+  },
+  {
+    "name": "water_pressure",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Pressione acqua impianto (bar)"
+  },
+  {
+    "name": "flow_rate",
+    "type": "FLOAT64",
+    "mode": "NULLABLE",
+    "description": "Portata (l/min)"
+  },
+  {
+    "name": "mode",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Modalità operativa della pompa di calore"
+  },
+  {
+    "name": "error_code",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Codice errore se presente"
+  },
+  {
+    "name": "additional_data",
+    "type": "STRING",
+    "mode": "NULLABLE",
+    "description": "Dati aggiuntivi in formato JSON"
+  }
+]

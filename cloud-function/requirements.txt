@@ -1,0 +1,13 @@
+# Requirements per Google Cloud Function
+# Ottimizzato per minimizzare cold start e memoria
+
+# BigQuery client (unica dipendenza necessaria)
+google-cloud-bigquery>=3.11.0
+
+# Per Cloud Functions Gen 2 (incluso automaticamente)
+# functions-framework>=3.0.0
+
+# Note:
+# - google-cloud-core è incluso come dipendenza di bigquery
+# - google-auth è incluso automaticamente nell'ambiente Cloud Functions
+# - Non servono altre dipendenze per mantenere la function leggera

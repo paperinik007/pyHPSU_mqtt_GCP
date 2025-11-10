@@ -6,6 +6,15 @@
 **This software is not supported by the manufacturer!!!!**
 
 # Welcome to pyHPSU
+
+## 🚀 Quick Start → BigQuery in 5 minuti!
+
+**NUOVO**: Setup completo gratuito con Google Cloud BigQuery!
+
+👉 **[QUICKSTART.md](QUICKSTART.md)** - Da zero a dati in BigQuery in 5 minuti!
+
+---
+
 pyHPSU is a set of python scripts and other files to read and modify the values of the Rotex® HPSU (possibly) also identical heating pumps from daikin®).
 
 It is based on the idea and the work of 
