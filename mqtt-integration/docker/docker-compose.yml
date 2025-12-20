@@ -1,0 +1,34 @@
+version: '3.8'
+
+# Docker Compose per Mosquitto MQTT Broker
+# Basato su IOTstack pattern, semplificato per solo Mosquitto
+
+networks:
+  default:
+    driver: bridge
+    ipam:
+      driver: default
+
+services:
+  mosquitto:
+    container_name: mosquitto
+    # Usa l'immagine appropriata per la tua architettura
+    # Per Raspberry Pi 32-bit: arm32v6/eclipse-mosquitto:2.0.18
+    # Per Raspberry Pi 64-bit o altri: eclipse-mosquitto:latest
+    image: arm32v6/eclipse-mosquitto:2.0.18
+    restart: unless-stopped
+    environment:
+      - TZ=${TZ:-Europe/Rome}  # Cambia con il tuo timezone
+    ports:
+      - "1883:1883"    # MQTT standard port
+      - "9001:9001"    # WebSocket port (opzionale)
+    volumes:
+      - ./volumes/mosquitto/config:/mosquitto/config
+      - ./volumes/mosquitto/data:/mosquitto/data
+      - ./volumes/mosquitto/log:/mosquitto/log
+      - ./volumes/mosquitto/pwfile:/mosquitto/pwfile
+    # Crea automaticamente le directory necessarie
+    command: >
+      sh -c "mkdir -p /mosquitto/config /mosquitto/data /mosquitto/log /mosquitto/pwfile &&
+             chown -R mosquitto:mosquitto /mosquitto &&
+             /usr/sbin/mosquitto -c /mosquitto/config/mosquitto.conf"

@@ -1,0 +1,25 @@
+# Esempio configurazione crontab per pyHPSU MQTT Integration
+# 
+# Per installare:
+# 1. crontab -e
+# 2. Copia e incolla la riga seguente
+# 3. Modifica il percorso se necessario
+
+# Esegue la lettura e pubblicazione parametri HPSU ogni minuto
+# Output e errori reindirizzati a /dev/null per proteggere la SD card
+* * * * * /home/pi/hpsu_mqtt_all.sh >/dev/null 2>&1
+
+# Varianti alternative:
+
+# Ogni 2 minuti (carico ridotto)
+# */2 * * * * /home/pi/hpsu_mqtt_all.sh >/dev/null 2>&1
+
+# Ogni 30 secondi (aggiornamenti più frequenti)
+# * * * * * /home/pi/hpsu_mqtt_all.sh >/dev/null 2>&1
+# * * * * * sleep 30; /home/pi/hpsu_mqtt_all.sh >/dev/null 2>&1
+
+# Solo durante il giorno (dalle 6 alle 23)
+# * 6-23 * * * /home/pi/hpsu_mqtt_all.sh >/dev/null 2>&1
+
+# Con log minimo (solo errori)
+# * * * * * /home/pi/hpsu_mqtt_all.sh 2>/home/pi/hpsu_mqtt_errors.log >/dev/null
