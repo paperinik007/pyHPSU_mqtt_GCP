@@ -102,6 +102,8 @@ Configure it in /etc/pyHPSU/pyhpsu.conf (look at the code of /usr/lib/python3/di
 ### MQTT
 Send the data to an MQTT broker.
 Configure it in /etc/pyHPSU/pyhpsu.conf (look at the code of /usr/lib/python3/dist-packages/HPSU/plugins/mqtt.py to find a template).
+Modificato rozzamente il file mqtt.py per permettere la pubblicazione dei dati su una coda pub/sub su GCP
+Da questa il dato (opportunamente formattato json) viene gestito da una cloud funtion e caricato su Big Query (ad esempio).
 
 ### OPENHAB
 Send the data to openHAB. Create an item for every command you want to use. You have to use a Prefix like `Rotex_` for all pyHPSU related item names. So pyHPSU will push every value to a item named [Prefix][command].

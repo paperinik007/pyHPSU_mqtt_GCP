@@ -44,6 +44,8 @@ cp -r resources/* $SHARE_DIR
 cp -r HPSU/* $DIST_DIR
 cp -r contrib $DIST_DIR
 
+chmod a+r $DIST_DIR/plugins/keys/* 
+
 # copy service file
 cp systemd/* $SERVICE_DIR
 systemctl --system daemon-reload

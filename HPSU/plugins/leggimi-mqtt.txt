@@ -1,0 +1,20 @@
+
+/home/pi/pubsub-call
+
+drwxr-xr-x 2 pi pi 4096 Oct 22 13:04 apikey
+-rwxr-x--- 1 pi pi 1472 Oct 22 13:40 pubsub-call.py
+
+
+nella directory apikey è conservata la chiave necessaria all'accesso alla api pub sub
+
+installate
+pip install -U google-cloud-pubsub
+pip install ipython
+
+configurata la variabile di ambiente
+export GOOGLE_APPLICATION_CREDENTIALS=/home/pi/py-pubsub-call/apikey/wio-cloud-335307-687c12dea870.json
+
+a questo punto l'esempio funziona
+python pubsub-call.py
+
+inserire nel .profile dell'utente pi la definizione della nuova variabile di ambiente 

@@ -1,0 +1,5 @@
+Nel .profile dell'utente è bene inserire
+
+export PATH=$PATH:$HOME/.local/bin
+
+in modo da permettere il funzionamento dei nuovi comandi
