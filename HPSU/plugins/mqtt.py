@@ -2,24 +2,58 @@
 # -*- coding: utf-8 -*-
 
 
-# config inf conf_file (defaults):
-# [MQTT]
-# BROKER = localhost
-# PORT = 1883
-# USERNAME = 
-# PASSWORD = 
-# CLIENTNAME = rotex_hpsu
-# PREFIX = rotex
+
+# [START iot_mqtt_includes]
+import argparse
+import datetime
+import logging
+import os
+import random
+import ssl
+import time
+
+#	import jwt
+import json
+
+#####
+from google.cloud import pubsub_v1 as pubsub
+#####
+
+# [END iot_mqtt_includes]
+
 
 import configparser
 import requests
 import sys
 import os
-import paho.mqtt.publish as publish
+#import paho.mqtt.publish as publish
 import paho.mqtt.client as mqtt
 
+algorithm='ES256' 
+ca_certs='/usr/lib/python3/dist-packages/HPSU/plugins/keys/roots.pem' 
+cloud_region='us-central1' 
+data='Hello there' 
+device_id='wio' 
+gateway_id=None 
+jwt_expires_minutes=1 
+listen_dur=60 
+message_type='event' 
+mqtt_bridge_hostname='mqtt.googleapis.com' 
+mqtt_bridge_port=8883 
+num_messages=1 
+private_key_file='/usr/lib/python3/dist-packages/HPSU/plugins/keys/ec_private.pem'
+project_id='wio-cloud-335307' 
+registry_id='wio-register' 
+service_account_json=None 
+command=None
+
+# inserito per invio in mqtt
+brokers_out={"broker1":"192.168.1.132"}
 
 
+
+
+#################################################################
 class export():
     hpsu = None
 
@@ -50,18 +84,6 @@ class export():
             self.clientname = self.config['MQTT']['CLIENTNAME']
         else:
             self.clientname = 'rotex'
-        # MQTT Username
-        if self.config.has_option('MQTT', 'USERNAME'):
-            self.username = self.config['MQTT']['USERNAME']
-        else:
-            self.username = None
-            print("Username not set!!!!!")
-
-        #MQTT Password
-        if self.config.has_option('MQTT', "PASSWORD"):
-            self.password = self.config['MQTT']['PASSWORD']
-        else:
-            self.password="None"
 
         #MQTT Prefix
         if self.config.has_option('MQTT', "PREFIX"):
@@ -74,37 +96,46 @@ class export():
             self.qos = self.config['MQTT']['QOS']
         else:
             self.qos = "0"
-
         self.client=mqtt.Client(self.clientname)
-        #self.client.on_publish = self.on_publish()
-        if self.username:
-           self.client.username_pw_set(self.username, password=self.password)
-        self.client.enable_logger()
 
-    
-        
-    #def on_publish(self,client,userdata,mid):
-    #   print("data published, mid: " + str(mid) + "\n")
-    #    pass
 
 
     def pushValues(self, vars=None):
-        
-        #self.msgs=[]
+
+        print("************************** ")
+        print("ricevuta stringa in mqtt.py ")
+        print("************************** ")
+
+        stringatempo = str(datetime.datetime.now())
+        stringa="{\"time\":"+"\""+stringatempo+"\""+","
+        fine="}"
+        h=0
+        vv="\""
+
         for r in vars:
-            self.client.connect(self.brokerhost, port=self.brokerport)
+	
             msgs=[]
-            if self.prefix:
-                ret=self.client.publish(self.prefix + "/" + r['name'],payload=r['resp'], qos=int(self.qos))
-                topic=self.prefix + "/" + r['name']
+
+            if (h==0):
+                stringa = stringa+vv+str(r['name'])+vv+":"+vv+str(r['resp'])+vv 
+                h=1
             else:
-                ret=self.client.publish(r['name'],payload=r['resp'], qos=int(self.qos))
-                topic=r['name']
-            msg={'topic':topic,'payload':r['resp'], 'qos':self.qos, 'retain':False}
-            self.client.disconnect()
+                stringa=stringa+","+vv+str(r['name'])+vv+":"+vv+str(r['resp'])+vv
+         
+        stringa = stringa + fine 
+        print("")
+        print(stringa)
+        print("")
+        print("ricevuta stringa e chiamato pubsub_api_call ")
 
-       
+        project_id = "wio-cloud-335307"
+        topic_id = "topic1"
 
+        publisher = pubsub.PublisherClient()
+        topic_path = publisher.topic_path(project_id, topic_id)
 
+        stringa_payload_bin = stringa.encode("utf-8")
+        future1 = publisher.publish(topic_path, stringa_payload_bin)
+        print(future1.result())
+        print("----- pubblicato su pubsub ------")
 
-   
