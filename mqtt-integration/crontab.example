@@ -1,0 +1,36 @@
+ # pyHPSU MQTT Integration Crontab Configuration
+  #
+  # This file contains example crontab entries for automated MQTT data publishing
+  # from the pyHPSU heat pump monitoring system.
+  #
+  # Installation:
+  # 1. Copy the desired lines below
+  # 2. Edit crontab: crontab -e
+  # 3. Paste and modify as needed
+  # 4. Save and exit
+
+  # Standard MQTT publishing (every 5 minutes)
+  # Publishes individual sensor values to separate MQTT topics
+  # Target: Local MQTT broker (192.168.0.106)
+  */5 * * * * /home/pi/pyHPSU/mqtt-integration/scripts/hpsu_mqtt_all.sh >/dev/null 2>&1
+
+  # Custom parametric MQTT publishing (every minute except multiples of 5)
+  # Publishes complete JSON payload to single MQTT topic
+  # Target: External MQTT server (configurable)
+  # Usage: script <MQTT_HOST> <MQTT_PORT> <TOPIC>
+  1-4,6-9,11-14,16-19,21-24,26-29,31-34,36-39,41-44,46-49,51-54,56-59 * * * *
+  /home/pi/pyHPSU/mqtt-integration/scripts/hpsu_mqtt_custom.sh 192.168.0.192 1883 /home/sensors >/dev/null 2>&1
+
+  # Alternative configurations:
+
+  # Single MQTT server (every 5 minutes) - use only one of the above
+  # */5 * * * * /home/pi/pyHPSU/mqtt-integration/scripts/hpsu_mqtt_custom.sh 192.168.0.192 1883 /home/sensors >/dev/null 2>&1
+
+  # High frequency monitoring (every minute) - use with caution, may overload CAN bus
+  # * * * * * /home/pi/pyHPSU/mqtt-integration/scripts/hpsu_mqtt_custom.sh 192.168.0.192 1883 /home/sensors >/dev/null 2>&1
+
+  # Notes:
+  # - Ensure scripts have executable permissions: chmod +x /home/pi/pyHPSU/mqtt-integration/scripts/*.sh
+  # - Monitor system load when using high frequency polling
+  # - The timing configuration above prevents CAN bus conflicts between scripts
+  # - Adjust IP addresses and topics according to your MQTT broker setup
