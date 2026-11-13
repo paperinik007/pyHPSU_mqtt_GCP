@@ -1,188 +1,77 @@
-# MQTT Integration for pyHPSU
+# Integrazione MQTT per pyHPSU
 
-Questa directory contiene tutto il necessario per integrare pyHPSU con un broker MQTT locale, permettendo la pubblicazione dei valori della pompa di calore su topic MQTT individuali.
+Script di shell, lanciati da **cron**, che leggono la pompa con `pyHPSU.py` e pubblicano i valori su un broker MQTT con `mosquitto_pub`. È la configurazione usata in produzione. Per il resto di pyHPSU (hardware, installazione, opzioni) vedi il `README.md` nella radice del repository.
 
-## Motivazione
+## Due flussi
 
-Questa integrazione è stata sviluppata per consentire il monitoraggio dei parametri HPSU tramite un vecchio smartphone utilizzato come display dedicato, con l'app **MQTT Dash** che permette di visualizzare agevolmente i valori in tempo reale dal broker Mosquitto. La soluzione pubblica ogni parametro su topic separati con valori semplici (non JSON) per massima compatibilità con client MQTT leggeri.
+| Script | Cosa pubblica | Frequenza |
+|---|---|---|
+| `scripts/hpsu_mqtt_all.sh` | **un topic per parametro**, `rotex/<parametro>`, solo il valore (non JSON). 6 parametri: `flow_rate`, `t_v1`, `t_dhw1`, `pump`, `t_ext`, `water_pressure`. Un avvio di `pyHPSU.py` per parametro, con 0,5 s di pausa | ogni 5 minuti |
+| `scripts/hpsu_mqtt_custom.sh <host> <porta> <topic>` | **un solo messaggio** con l'uscita di una chiamata di `pyHPSU.py` per 15 parametri: `flow_rate posmix bpv t_v1 t_dhw1 t_r1 pump ehs mode t_hc_set t_dhw_set t_vbh t_ext water_pressure tdhw2`. È una lista `[{"name":..., "resp":..., "timestamp":...}, ...]` con gli apici `'` sostituiti da `"` | ogni minuto **tranne i multipli di 5** |
 
-## Caratteristiche
+Il primo serve per un telefono usato come display (app **MQTT Dash**, valori semplici), il secondo per alimentare un database o una dashboard. Gli orari sono scelti perché i due script non usino il bus CAN nello stesso momento; la lettura ogni minuto di tutto può sovraccaricare il bus.
 
-- **Pubblicazione granulare**: Ogni parametro viene pubblicato su un topic specifico (es: `rotex/flow_rate`)
-- **Valori semplici**: Solo il valore numerico/testuale, non JSON (compatibile con MQTT Dash)
-- **Aggiornamento continuo**: Tutti i parametri vengono aggiornati ogni minuto
-- **Container Mosquitto**: Broker MQTT locale in Docker con auto-start
-- **Ottimizzato per app mobile**: Formato dati compatibile con client MQTT come MQTT Dash
-
-## Struttura
+## Contenuto
 
 ```
 mqtt-integration/
 ├── scripts/
-│   ├── hpsu_mqtt_all.sh          # Script principale per lettura e pubblicazione
-│   └── install_mqtt.sh           # Script di installazione automatica
+│   ├── hpsu_mqtt_all.sh       un topic per parametro (rotex/<parametro>)
+│   ├── hpsu_mqtt_custom.sh    un messaggio JSON, host/porta/topic come argomenti
+│   ├── install_mqtt.sh        installazione guidata di Mosquitto + cron (vedi sotto)
+│   ├── test_mqtt.sh           verifica dell'installazione
+│   └── uninstall_mqtt.sh      rimozione
 ├── docker/
-│   ├── docker-compose.yml        # Configurazione Mosquitto
-│   └── mosquitto.conf            # Configurazione broker (opzionale)
-├── examples/
-│   └── crontab.example           # Esempio configurazione cron
-└── README.md                     # Questa documentazione
-```
-
-## Installazione Automatica
-
-```bash
-# Clona il repository
-git clone https://github.com/tuouser/pyHPSU.git
-cd pyHPSU/mqtt-integration
-
-# Rendi eseguibili gli script
-chmod +x scripts/*.sh
-
-# Esegui l'installazione completamente automatica
-./scripts/install_mqtt.sh
-```
-
-Lo script di installazione:
-- ✅ Rileva automaticamente l'IP locale
-- ✅ Installa Docker e Docker Compose se mancanti
-- ✅ Configura il container Mosquitto
-- ✅ Crea e configura lo script di monitoraggio
-- ✅ Configura automaticamente il crontab (opzionale)
-- ✅ Testa la connessione MQTT
-
-## Test e Verifica
-
-```bash
-# Testa l'installazione
-./scripts/test_mqtt.sh
-
-# Monitora i valori in tempo reale
-mosquitto_sub -h IP_LOCAL -t "rotex/+"
-
-# Esegui manualmente
-~/hpsu_mqtt_all.sh
+│   ├── docker-compose.yml     Mosquitto (immagine arm32v6, Raspberry a 32 bit)
+│   └── mosquitto.conf
+├── examples/crontab.example   esempio per lo script installato in $HOME da install_mqtt.sh
+├── crontab.example            esempio della configurazione di produzione
+└── README.md
 ```
 
 ## Configurazione
 
-### Parametri Monitorati
+- **`hpsu_mqtt_all.sh`**: l'indirizzo del broker è la variabile `MQTT_HOST` all'inizio dello script (il valore nel repository è un esempio da cambiare); poi `MQTT_PORT`, `MQTT_BASE_TOPIC` (`rotex`) e l'array `PARAMS`.
+- **`hpsu_mqtt_custom.sh`**: host, porta e topic si passano come argomenti; i parametri sono nella riga `pyHPSU.py -c ...` (un `-c nome` in più per aggiungerne, i nomi validi sono quelli di `pyHPSU.py -h`).
+- Entrambi richiedono `pyHPSU.py` nel `PATH` (installato con `install.sh` del repository) e `mosquitto-clients`.
 
-Di default vengono monitorati questi parametri:
-- `flow_rate`: Portata dell'impianto
-- `t_v1`: Temperatura mandata
-- `t_dhw1`: Temperatura acqua calda sanitaria  
-- `pump`: Stato pompa
-- `t_ext`: Temperatura esterna
-- `water_pressure`: Pressione acqua
+## Crontab di produzione
 
-### Topic MQTT
+```
+*/5 * * * * /home/pi/pyHPSU/mqtt-integration/scripts/hpsu_mqtt_all.sh >/dev/null 2>&1
+1-4,6-9,11-14,16-19,21-24,26-29,31-34,36-39,41-44,46-49,51-54,56-59 * * * * /home/pi/pyHPSU/mqtt-integration/scripts/hpsu_mqtt_custom.sh <host_broker> 1883 /home/sensors >/dev/null 2>&1
+```
+L'uscita su `/dev/null` serve anche a non scrivere di continuo sulla scheda SD. Con questo reindirizzamento un broker irraggiungibile non lascia nessuna traccia: controlla ogni tanto che i messaggi arrivino (`mosquitto_sub -h <host_broker> -t '#' -v`).
 
-I valori vengono pubblicati sui topic:
-- `rotex/flow_rate`
-- `rotex/t_v1`
-- `rotex/t_dhw1`
-- `rotex/pump`
-- `rotex/t_ext`
-- `rotex/water_pressure`
-
-### Personalizzazione
-
-Modifica il file `scripts/hpsu_mqtt_all.sh` per:
-- Cambiare l'IP del broker MQTT (`MQTT_HOST`)
-- Aggiungere/rimuovere parametri (array `PARAMS`)
-- Modificare il prefisso dei topic (`MQTT_BASE_TOPIC`)
-
-## Utilizzo con MQTT Dash
-
-Per configurare **MQTT Dash** sul tuo smartphone:
-
-1. **Installa MQTT Dash** dal Play Store
-2. **Configurazione broker**:
-   - Server: IP del Raspberry Pi (es: 192.168.0.106)
-   - Porta: 1883
-3. **Aggiungi tile per ogni parametro**:
-   - Topic: `rotex/flow_rate`, `rotex/t_v1`, etc.
-   - Tipo: Text o Gauge
-   - Unità di misura: °C, bar, l/h secondo il parametro
-
-## Monitoraggio
+## Installazione guidata di Mosquitto (`install_mqtt.sh`)
 
 ```bash
-# Testa manualmente lo script
-./scripts/hpsu_mqtt_all.sh
+git clone https://github.com/paperinik007/pyHPSU_mqtt_GCP.git
+cd pyHPSU_mqtt_GCP/mqtt-integration
+chmod +x scripts/*.sh
+./scripts/install_mqtt.sh        # senza sudo: lo script si rifiuta di girare come root
+```
+Lo script: rileva l'IP locale, installa Docker, Docker Compose e `mosquitto-clients` se mancano, avvia Mosquitto da `docker/docker-compose.yml`, copia `hpsu_mqtt_all.sh` in `$HOME` con l'IP locale come broker e, se lo confermi, aggiunge una riga di cron **ogni minuto** per quella copia. È una configurazione diversa da quella di produzione (5 minuti, script nella cartella del repository): se vuoi quella, modifica il cron a mano dopo l'installazione. In produzione Mosquitto è gestito da IOTstack, non da questo compose.
 
-# Monitora i topic MQTT
-mosquitto_sub -h IP_BROKER -t "rotex/+"
+`docker/mosquitto.conf` ha `allow_anonymous true` e un listener WebSocket sulla 9001: va bene solo in una rete locale fidata.
 
-# Verifica i log del container
-docker logs mosquitto
+## Verifica
 
-# Controlla il crontab
+```bash
+./scripts/test_mqtt.sh                          # prova guidata
+mosquitto_sub -h <host_broker> -t "rotex/+" -v  # valori di hpsu_mqtt_all.sh
+./scripts/hpsu_mqtt_all.sh                      # esecuzione manuale
+docker logs mosquitto                           # log del broker (se in Docker)
 crontab -l
 ```
 
-## Gestione
+## MQTT Dash (telefono)
 
-### Script disponibili
+1. Installa **MQTT Dash** dal Play Store.
+2. Broker: IP del Raspberry (o di dove gira Mosquitto), porta 1883.
+3. Una tile per parametro: topic `rotex/flow_rate`, `rotex/t_v1`, ecc.; tipo Text o Gauge; unità secondo il parametro (°C, bar, l/h).
 
-```bash
-# Installazione
-./scripts/install_mqtt.sh      # Installazione automatica completa
-
-# Test e diagnostica  
-./scripts/test_mqtt.sh         # Verifica funzionamento completo
-
-# Disinstallazione
-./scripts/uninstall_mqtt.sh    # Rimozione completa dell'integrazione
-```
-
-### Comandi utili
-
-```bash
-# Gestione container
-docker-compose up -d           # Avvia Mosquitto
-docker-compose down            # Ferma Mosquitto  
-docker logs mosquitto          # Log del broker
-
-# Gestione crontab
-crontab -l                     # Mostra configurazione attuale
-crontab -e                     # Modifica configurazione
-```
-
-## Troubleshooting
-
-### Container non si avvia
-```bash
-# Verifica Docker
-sudo systemctl status docker
-sudo systemctl start docker
-
-# Controlla i log
-docker logs mosquitto
-```
-
-### Valori non pubblicati
-```bash
-# Testa pyHPSU manualmente
-pyHPSU.py -c flow_rate
-
-# Verifica connessione MQTT
-mosquitto_pub -h IP_BROKER -t "test" -m "hello"
-```
-
-### Crontab non funziona
-```bash
-# Controlla i log di cron
-sudo tail -f /var/log/syslog | grep CRON
-
-# Testa lo script manualmente
-/home/pi/hpsu_mqtt_all.sh
-```
-
-## Integrazione con Home Assistant
-
-Aggiungi questo alla configurazione di Home Assistant:
+## Home Assistant
 
 ```yaml
 mqtt:
@@ -190,16 +79,19 @@ mqtt:
     - name: "HPSU Flow Rate"
       state_topic: "rotex/flow_rate"
       unit_of_measurement: "l/h"
-      
     - name: "HPSU Temperatura Mandata"
       state_topic: "rotex/t_v1"
       unit_of_measurement: "°C"
-      
     - name: "HPSU Temperatura Esterna"
       state_topic: "rotex/t_ext"
       unit_of_measurement: "°C"
-      
     - name: "HPSU Pressione Acqua"
       state_topic: "rotex/water_pressure"
       unit_of_measurement: "bar"
 ```
+
+## Problemi comuni
+
+- **Valori non pubblicati**: prova `pyHPSU.py -c flow_rate` a mano; poi `mosquitto_pub -h <host_broker> -t test -m hello`.
+- **Il cron non parte**: `sudo grep CRON /var/log/syslog | tail`; gli script devono essere eseguibili (`chmod +x`).
+- **Il container non si avvia**: `sudo systemctl status docker`, `docker logs mosquitto`.
