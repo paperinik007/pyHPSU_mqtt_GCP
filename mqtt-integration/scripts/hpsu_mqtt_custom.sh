@@ -20,7 +20,7 @@ MQTT_TOPIC="$3"
 echo "$(date): Inizio lettura parametri HPSU verso $MQTT_HOST:$MQTT_PORT"
 
 # Esegui pyHPSU con tutti i parametri e cattura l'output completo
-payload=$(pyHPSU.py -c flow_rate -c posmix -c bpv -c t_v1 -c t_dhw1 -c t_r1 -c pump -c ehs -c mode -c t_hc_set -c t_dhw_set -c t_vbh -c t_ext -c water_pressure 2>/dev/null | sed "s/'/\"/g")
+payload=$(pyHPSU.py -c flow_rate -c posmix -c bpv -c t_v1 -c t_dhw1 -c t_r1 -c pump -c ehs -c mode -c t_hc_set -c t_dhw_set -c t_vbh -c t_ext -c water_pressure -c tdhw2 2>/dev/null | sed "s/'/\"/g")
 
 # Verifica se il payload è valido
 if [ -n "$payload" ]; then

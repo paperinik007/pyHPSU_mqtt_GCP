@@ -123,7 +123,7 @@ Uscita tipica:
 ```
 [{'name': 't_hs', 'resp': '32.00', 'timestamp': 1544534667.414178}]
 ```
-**Dal codice:** `pyHPSU.py` stampa su stdout anche la riga `chiamo read_can JSON` *prima* dei dati (è un `print` di debug in `read_can`). Chi legge l'uscita dello script (pipe, cron, cattura in una variabile) riceve quindi anche quella riga.
+**Differenza tra repository e Raspberry di produzione.** Il `pyHPSU.py` di questo repository stampa su stdout righe di debug: `chiamo read_can JSON` *prima* dei dati e, con un plugin, `pushValues chiamato` e righe di trattini. Il `pyHPSU.py` installato sul Pi di produzione (file datato 27 aprile 2023, confrontato con il repository) **non le ha**: lì l'uscita contiene solo i dati. Chi legge l'uscita (pipe, cron, variabile di shell) con il `pyHPSU.py` del repository riceve anche quelle righe. Gli altri file installati sul Pi (`pyHPSUd.py`, `commands_hpsu*`, i driver) sono uguali a quelli del repository; cambiano soltanto l'indirizzo del broker nei plugin `mqtt.py` e `invio_mqtt_gcp.py` (sul Pi punta al broker locale) e la lingua in `pyhpsu.conf` (`DE` sul Pi, `IT` nel repository).
 
 ## Catalogo dei comandi
 - `etc/pyHPSU/commands_hpsu.json`: **147 comandi** (indirizzo CAN, tipo, divisore, unità). **103** sono marcati `writable`.
@@ -203,14 +203,14 @@ Questo è il flusso reale: un Raspberry Pi Zero W con HAT MCP2515, **cron** (le 
 | Script | Cosa pubblica | Frequenza consigliata (`mqtt-integration/crontab.example`) |
 |---|---|---|
 | `scripts/hpsu_mqtt_all.sh` | un topic per parametro, `rotex/<parametro>`, solo il valore (non JSON). 6 parametri: `flow_rate`, `t_v1`, `t_dhw1`, `pump`, `t_ext`, `water_pressure`. Un avvio di `pyHPSU.py` **per parametro**, con 0,5 s di pausa | ogni 5 minuti |
-| `scripts/hpsu_mqtt_custom.sh <host> <porta> <topic>` | un solo messaggio con tutta l'uscita di **una** chiamata di `pyHPSU.py` per 14 parametri (`flow_rate posmix bpv t_v1 t_dhw1 t_r1 pump ehs mode t_hc_set t_dhw_set t_vbh t_ext water_pressure`), con gli apici `'` sostituiti da `"` | ogni minuto **tranne i multipli di 5** |
+| `scripts/hpsu_mqtt_custom.sh <host> <porta> <topic>` | un solo messaggio con tutta l'uscita di **una** chiamata di `pyHPSU.py` per 15 parametri (`flow_rate posmix bpv t_v1 t_dhw1 t_r1 pump ehs mode t_hc_set t_dhw_set t_vbh t_ext water_pressure tdhw2`), con gli apici `'` sostituiti da `"` | ogni minuto **tranne i multipli di 5** |
 
 Gli orari sono scelti perché i due script non usino il bus CAN nello stesso momento (così dice il commento di `mqtt-integration/crontab.example`). Lo stesso file avverte che la lettura ogni minuto può sovraccaricare il bus.
 
-Per aggiungere un parametro a `hpsu_mqtt_custom.sh` basta un `-c nome` in più (i nomi validi sono quelli di `pyHPSU.py -h`). Sul Pi di produzione l'elenco ha un quindicesimo parametro, `tdhw2` (secondo sensore dell'acqua calda), messo in coda alla riga `pyHPSU.py`; nel repository è ancora l'elenco da 14.
+Per aggiungere un parametro a `hpsu_mqtt_custom.sh` basta un `-c nome` in più (i nomi validi sono quelli di `pyHPSU.py -h`). L'ultimo parametro, `tdhw2` (secondo sensore dell'acqua calda), è stato aggiunto in coda alla riga `pyHPSU.py` il 2026-11-13; `hpsu_mqtt_all.sh` non lo legge.
 
 **Dal codice, due cose da sapere**
-- `hpsu_mqtt_custom.sh` pubblica l'**intero** stdout di `pyHPSU.py`, che comincia con la riga `chiamo read_can JSON` (vedi sopra), seguita dalla lista `[{"name":..., "resp":..., "timestamp":...}, ...]`. Chi riceve deve scartare quella riga.
+- `hpsu_mqtt_custom.sh` pubblica l'**intero** stdout di `pyHPSU.py`, cioè la lista `[{"name":..., "resp":..., "timestamp":...}, ...]`. Con il `pyHPSU.py` installato in produzione è la sola lista; con quello di questo repository il messaggio comincia con la riga di debug `chiamo read_can JSON` (vedi [Uso](#uso)).
 - In `hpsu_mqtt_all.sh` l'indirizzo del broker è la variabile `MQTT_HOST` all'inizio dello script (il valore nel repository è un esempio da cambiare); porta e prefisso sono `MQTT_PORT` e `MQTT_BASE_TOPIC`.
 
 ## Esempio di crontab
@@ -253,7 +253,7 @@ install.sh                installazione di sistema
 # Limiti noti
 - Nessun test automatico: tutto quanto qui sopra è stato verificato sul campo o leggendo il codice, non con una suite.
 - I valori di `[PYHPSU]` e `[CANPI]` in `pyhpsu.conf` sono ignorati (vedi sopra).
-- `pyHPSU.py` stampa righe di debug su stdout oltre ai dati.
+- Il `pyHPSU.py` del repository stampa righe di debug su stdout oltre ai dati; quello installato sul Pi di produzione no (vedi [Uso](#uso)). Chi aggiorna il Pi dal repository con `install.sh` ottiene la versione con le righe di debug.
 - Il percorso dei plugin (`/usr/lib/python3/dist-packages/HPSU/plugins`) e il nome del canale CAN (`can0`) sono fissi nel codice.
 - L'indirizzo del broker e il progetto Pub/Sub dei plugin `mqtt`/`invio_mqtt_gcp` sono scritti nei sorgenti.
 - Le credenziali (broker MQTT, Google, database) non vanno nel repository: tienile nei file di configurazione locali.
