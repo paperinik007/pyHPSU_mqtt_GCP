@@ -47,7 +47,7 @@ service_account_json=None
 command=None
 
 # inserito per invio in mqtt
-brokers_out={"broker1":"192.168.1.132"}
+brokers_out={"broker1":"192.168.0.106"}
 
 
 

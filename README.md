@@ -123,7 +123,9 @@ Uscita tipica:
 ```
 [{'name': 't_hs', 'resp': '32.00', 'timestamp': 1544534667.414178}]
 ```
-Su stdout `pyHPSU.py` stampa **solo i dati** (con i plugin, quello che stampa il plugin). Le versioni di questo repository precedenti al 2026-11-13 stampavano anche righe di debug (`chiamo read_can JSON` prima dei dati, `pushValues chiamato` e righe di trattini con un plugin): sono state tolte per allineare il repository al `pyHPSU.py` installato sul Raspberry di produzione (file del 27 aprile 2023), che non le ha mai avute. Gli altri file installati sul Pi (`pyHPSUd.py`, `commands_hpsu*`, i driver) sono uguali a quelli del repository; cambiano soltanto l'indirizzo del broker nei plugin `mqtt.py` e `invio_mqtt_gcp.py` (sul Pi punta al broker locale) e la lingua in `pyhpsu.conf` (`DE` sul Pi, `IT` nel repository).
+Su stdout `pyHPSU.py` stampa **solo i dati** (con i plugin, quello che stampa il plugin). Le versioni di questo repository precedenti al 2026-11-13 stampavano anche righe di debug (`chiamo read_can JSON` prima dei dati, `pushValues chiamato` e righe di trattini con un plugin): sono state tolte per allineare il repository al `pyHPSU.py` installato sul Raspberry di produzione (file del 27 aprile 2023), che non le ha mai avute.
+
+**Il repository coincide con la produzione.** Il programma installato sul Raspberry di produzione (`pyHPSU.py`, `pyHPSUd.py`, driver, plugin, cataloghi dei comandi, `contrib` e `pyhpsu.conf`) è stato confrontato con questo repository il 2026-11-13 e i file sono stati allineati; per i plugin `mqtt.py` e `invio_mqtt_gcp.py` ciò significa che il broker fisso nel sorgente è quello locale del Pi, e in `pyhpsu.conf` `PYHPSU_LANG` è `DE`. Restano fuori dal repository, di proposito, solo le chiavi in `HPSU/plugins/keys/` (`ec_private.pem`, `ec_public.pem`): la chiave privata non va mai in git.
 
 ## Catalogo dei comandi
 - `etc/pyHPSU/commands_hpsu.json`: **147 comandi** (indirizzo CAN, tipo, divisore, unità). **103** sono marcati `writable`.
